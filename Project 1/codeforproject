@@ -1,0 +1,34 @@
+Last login: Tue Sep 24 10:04:49 on console
+(base) taylorgaldi@Taylors-MacBook-Pro ~ % cd git
+(base) taylorgaldi@Taylors-MacBook-Pro git % git clone https://github.com/taylorgaldi/Computational-Social-Science-Projects.git
+Cloning into 'Computational-Social-Science-Projects'...
+remote: Enumerating objects: 3, done.
+remote: Counting objects: 100% (3/3), done.
+remote: Total 3 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Receiving objects: 100% (3/3), done.
+(base) taylorgaldi@Taylors-MacBook-Pro git % mkdir "Project 1"
+(base) taylorgaldi@Taylors-MacBook-Pro git % ls
+Computational-Social-Science-Projects
+Computational-Social-Science-Training-Program
+GitHub-Collaboration-Practice
+Project 1
+git-challenges
+group_project
+my_second_repo
+(base) taylorgaldi@Taylors-MacBook-Pro git % rm -r "Project 1"
+(base) taylorgaldi@Taylors-MacBook-Pro git % ls
+Computational-Social-Science-Projects
+Computational-Social-Science-Training-Program
+GitHub-Collaboration-Practice
+git-challenges
+group_project
+my_second_repo
+(base) taylorgaldi@Taylors-MacBook-Pro git % cd Computational-Social-Science-Projects
+(base) taylorgaldi@Taylors-MacBook-Pro Computational-Social-Science-Projects % mkdir "Project 1"
+(base) taylorgaldi@Taylors-MacBook-Pro Computational-Social-Science-Projects % cd "Project 1"
+(base) taylorgaldi@Taylors-MacBook-Pro Project 1 % touch "codeforproject"
+(base) taylorgaldi@Taylors-MacBook-Pro Project 1 % git status
+(base) taylorgaldi@Taylors-MacBook-Pro Project 1 % git add *
+(base) taylorgaldi@Taylors-MacBook-Pro Project 1 % git status 
+(base) taylorgaldi@Taylors-MacBook-Pro Project 1 % git commit -m "Project 1 additions"
+(base) taylorgaldi@Taylors-MacBook-Pro Project 1 % git push  
