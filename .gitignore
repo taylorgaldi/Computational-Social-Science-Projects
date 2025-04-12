@@ -1,0 +1,24 @@
+# Ignore figure-latex folder
+Project-6-Template_files/figure-latex/
+
+# Ignore RStudio specific files
+.Rhistory
+.Rproj.user
+
+# Ignore output files
+*.html
+*.pdf
+# Ignore the Data folder
+Data/
+
+# Ignore figure-latex folder
+Project-6-Template_files/figure-latex/
+
+# Ignore RStudio specific files
+.Rhistory
+.Rproj.user
+
+# Ignore output files
+*.html
+*.pdf
+*.docx
