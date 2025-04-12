@@ -1,13 +1,4 @@
 # Ignore figure-latex folder
-Project-6-Template_files/figur# Ignore figure-latex folder
-Project-6-Template_files/figure-latex/
-
-# Ignore RStudio specific files
-.Rhistory
-.Rproj.user
-
-# Ignore output files
-# Ignore figure-latex folder
 Project-6-Template_files/figure-latex/
 
 # Ignore RStudio specific files
@@ -20,3 +11,4 @@ Project-6-Template_files/figure-latex/
 
 # Ignore the Data folder
 Data/
+*.csv
