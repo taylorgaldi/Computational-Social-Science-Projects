@@ -6,8 +6,8 @@ Project-6-Template_files/figure-latex/
 .Rproj.user
 
 # Ignore output files
-*.html
-*.pdf
+*.tex
+*.log
 
 # Ignore the Data folder
 Data/
