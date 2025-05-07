@@ -24,7 +24,7 @@ library(scales)
 set.seed(44)
 
 # load data
-medicaid_expansion <- read_csv('/Users/taylorgaldi/Computational-Social-Science-Training-Program/Projects/Project 7/data/medicaid_expansion.csv')
+medicaid_expansion <- read_csv("data/medicaid_expansion.csv")
 colnames(medicaid_expansion)
 ```
 
@@ -229,23 +229,8 @@ compare_states <- compare_states %>%
               select(State, total_uninsured_population, mean_uninsured_rate),
             by = "State")
 
-# Fit a linear model to calculate the slope of the uninsured rate trend pre-2014
-state_slopes <- compare_states %>%
-  group_by(State, Adopted) %>%
-  do({
-    lm_model <- lm(uninsured_rate ~ year, data = .)  # Fit a linear model
-    slope_value <- coef(lm_model)["year"]  # Extract the slope 
-    # Create a data frame with the slope and all other columns
-    data.frame(., slope = slope_value)  # Make sure the original columns are in the dataframe too
-  })
-
-# Ensure 'Adopted' is a factor for coloring
-#state_slopes_sorted_desc$Adopted <- factor(state_slopes_sorted_desc$Adopted, levels = c("Never", "Expanded"))
-
-# Plot the slopes with ggplot2
-
 ```
-I had such a hard time trying to figure out how to show parallel trends lol. As I've griped about in class, I feel like parallel trends are pretty unconvincing, it's pretty easy for me to think something fails the eye test unless the lines are like really similar. 
+I had such a hard time trying to figure out how to show parallel trends lol. As I've griped about in class, I feel like parallel trends are pretty unconvincing, it's pretty easy for me to think something fails the eye test unless the lines are, like, really similar. 
 
 ```{r}
 #Parallel trends plot
@@ -311,10 +296,10 @@ I think this means that California's uninsured rate went down bt -0.01648 from t
 ## Discussion Questions
 
 - Card/Krueger's original piece utilized the fact that towns on either side of the Delaware river are likely to be quite similar to one another in terms of demographics, economics, etc. Why is that intuition harder to replicate with this data?
-- **Answer**:
+Like discussed above, the trade-off between choosing two states whose parallel trend lines are more convincing and ones whose policy context seem similar is actually more difficult than one might imagine; as we saw above, places with seemingly similar policy contexts (neighboring states with similar populations and mean rates of uninsured population) often had really wonky parallel trends that were often thrown off by just one year. Maybe it's not even fair to assume that geographically neighboring or similar (e.g. comparing two midwestern states) states would have similar policy contexts, but it definitely seems more intuitive that Georgia is more similar to Florida than it is to California. But I think that would be the intuition of Card/Krueger that can't be applied here; two neighboring towns are probably more likely to be similar than two neighboring states, but even that feels like a stretch. Two towns that are split by some geographical feature might have differences - see the construction of highways in Oakland. 
 
 - What are the strengths and weaknesses of using the parallel trends assumption in difference-in-differences estimates?
-- **Answer**:
+I think the strength is how powerful the visual aspect of parallel trends is. Even though it is subjective, if you see two lines that basically have the same exact slope,it's hard to argue with that. My California/Georgia example may not be the best, but if it were a little better visually, the existence of the parallel trends visually will kind of rebut claims that these places are too different to compare. Meaning, if the outcome of interest is trending in the same exact ways in these two places, it seems likely that no matter how different they are, covariates are seemingly impacting them in the same way. I think the weakness for me, as mentioned, is also the visual aspect and the fact that it is not really a mathematical formulation of "parallelness," like there's no universal standard, it's just sort of a visual thing that your reviewers may or may not be convinced by. I guess the upshot of that is anyone who is doing serious diff-in-diff work probably is really good at defending their analytical choices to stave off criticisms for those who are typically unconvinced by parallel trends!
 
 
 # Synthetic Control
@@ -327,8 +312,65 @@ Do the following:
 
 - Choose a state that adopted the Medicaid expansion after January 1, 2014. Construct a non-augmented synthetic control and plot the results (both pre-treatment fit and post-treatment differences). Also report the average ATT and L2 imbalance.
 
+
+
 ```{r}
 # non-augmented synthetic control
+#Find delayed adopters
+adopted_post2014 <- medicaid_expansion_full %>%
+  filter(Date_Adopted > as.Date("2014-12-31")) %>%
+  distinct(State, Date_Adopted)
+
+view(adopted_post2014)
+#I'm not sure if I should be using some theory-informed state for the synthetic control, but my gut is telling me to pick a state that adopted on New Years day of some year. Earlier in the notebook it said don't choose 2014 or 2015 for DiD, so I won't choose either. Therefore, I'll choose 01-01-2016 as my date, which hopefully will still give me enough data post-treatment.
+treated_state <- "Montana"
+# Clean data
+medicaid_clean <- medicaid_expansion_full%>%
+  mutate(
+    treatment = ifelse(State == treated_state & year >= as.numeric(format(Date_Adopted, "%Y")), 1, 0)  # Assign treatment to Montana post-2016
+  )
+
+# Run non-augmented synthetic control
+syn <- augsynth(
+  uninsured_rate ~ treatment,  # Outcome variable and treatment indicator
+  unit = State,                # Unit (states)
+  time = year,                 # Time variable (year)
+  data = medicaid_clean,       # Data frame
+  progfunc = "none",           # No augmentation
+  scm = TRUE                   # Enable synthetic control
+)
+
+# Summary of results
+summary(syn)
+
+```
+
+
+```{r}
+# plot
+plot(syn)
+```
+
+
+```{r}
+weights_df <- data.frame(syn$weights) %>%
+  tibble::rownames_to_column('State') %>%
+  rename(syn_weight = syn.weights)
+
+# Plot weights
+library(ggplot2)
+library(ggthemes)
+
+ggplot(weights_df) +
+  geom_col(aes(x = State, y = syn_weight), fill = "steelblue") +
+  coord_flip() +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  labs(
+    title = "Synthetic Control Weights",
+    x = "State",
+    y = "Weight"
+  )
 ```
 
 - Re-run the same analysis but this time use an augmentation (default choices are Ridge, Matrix Completion, and GSynth). Create the same plot and report the average ATT and L2 imbalance.
