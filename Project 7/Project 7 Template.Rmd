@@ -510,64 +510,84 @@ print(weights_plot)
 ```
 ...why are none of the weights negative
 ```{r}
-# # Create a comparison plot between actual, non-aug synthetic, and ridge Montana
-# # Aniket's method for getting the underlying data
-# syn_sum <- summary(syn)
-# 
-# # create synthetic Kansas 
-# # ---------
-# montana_synmontana <- 
-#   # data
-#   medicaid_expansion_full %>%   
-#   # filter just Kansas 
-#   filter(state == "Montana") %>% 
-#   # bind columns 
-#   bind_cols(difference = syn_sum$att$Estimate) %>%    # add in estimate 
-#   # calculate synthetic Kansas
-#   mutate(synthetic_montana = lngdpcapita + difference) # adds the estimate to the observed Kansas to create synthetic Kansas
-# 
-# ridge_sum <- summary(ridge_syn)
-# 
-# # create synthetic Kansas 
-# # ---------
-# kansas_synkansas_ridgesynkansas <- kansas_synkansas %>%
-#   bind_cols(ridge_difference = ridge_sum$att$Estimate) %>%
-#   mutate(ridge_synthetic_kansas = lngdpcapita + ridge_difference)
-# 
-# # plot
-# # ---------
-# kansas_synkansas_ridgesynkansas %>%
-#   ggplot() +
-#   
-#   # kansas
-#   # ---------
-#   geom_line(aes(x = year_qtr, 
-#                 y = lngdpcapita, 
-#                 color = 'Kansas')) +
-#   # synthetic kansas
-#   # ---------
-#   geom_line(aes(x = year_qtr, 
-#                 y = synthetic_kansas, 
-#                 color = 'Synthetic Kansas')) +
-#   # ridge kansas
-#   # ---------
-#   geom_line(aes(x = year_qtr, 
-#                 y = ridge_synthetic_kansas, 
-#                 color = 'Ridge Synthetic Kansas')) +
-#   # use scale color manual to assign color values 
-#   scale_color_manual(values = c('Kansas' = 'red', 
-#                                 'Synthetic Kansas' = 'blue',
-#                                 'Ridge Synthetic Kansas' = 'green')) +
-#   geom_vline(aes(xintercept = 2012.5)) +
-#   # themes
-#   theme_fivethirtyeight() +
-#   theme(axis.title = element_text()) +
-#   # labels 
-#   ggtitle('Kansas, Synthetic Kansas, Ridge Synthetic Kansas') +
-#   xlab('Year-Quarter') +
-#   ylab('State GDP Per Capita')
+# Create a comparison plot between actual, non-aug synthetic, and ridge Montana
+#Kasey I tried so hard to put all three on the same graph using the 6-6 notebook and it just would not work I'm sorry... so here's ridge vs  observed
+# Create a tidysynth object for the ridge-augmented version
+medicaid_out_ridge <- medicaid_clean %>%
+  synthetic_control(
+    outcome = uninsured_rate,
+    unit = State,
+    time = year,
+    i_unit = "Montana",
+    i_time = 2016,
+    generate_placebos = TRUE
+  ) %>%
+  # Use ridge regression for augmentation
+  generate_predictor(
+    time_window = 2008:2013,
+    avg_uninsured = mean(uninsured_rate, na.rm = TRUE)
+  ) %>%
+  # In tidysynth, ridge augmentation can be specified in the weights function
+  generate_weights(
+    optimization_window = 2008:2015,
+    ridge_penalty = 0.1  # Add a ridge penalty
+  ) %>%
+  generate_control()
+
+# Plot the ridge-augmented results
+medicaid_out_ridge %>% plot_trends()
+medicaid_out_ridge %>% plot_differences()
 ```
-Fix this code to include synthetic montana based on the example notebook on kansas that did the manual calculations
+
+```{r}
+# Create a dataset specifically comparing the two synthetic controls, ridge and non-aug
+# ---------
+# Get summaries from both models
+syn_sum <- summary(syn)
+aug_syn_sum <- summary(aug_syn)
+
+# Create Montana with synthetic controls - IMPORTANT: Subtract ATT not add it
+montana_synmontana <- 
+  # data
+  medicaid_clean %>%   
+  # filter just Montana 
+  filter(State == "Montana") %>% 
+  # Create synthetic Montana values by SUBTRACTING the ATT 
+  # (since negative ATT means uninsured rate decreased)
+  mutate(
+    synthetic_montana = uninsured_rate + non_aug_att,
+    aug_synthetic_montana = uninsured_rate + aug_att
+  )
+
+# Plot all three lines
+montana_synmontana %>%
+  ggplot() +
+  # Montana actual
+  geom_line(aes(x = year, 
+                y = uninsured_rate, 
+                color = 'Montana')) +
+  # Synthetic Montana (non-augmented)
+  geom_line(aes(x = year, 
+                y = synthetic_montana, 
+                color = 'Synthetic Montana')) +
+  # Augmented Synthetic Montana
+  geom_line(aes(x = year, 
+                y = aug_synthetic_montana, 
+                color = 'Augmented Synthetic Montana')) +
+  # Use scale color manual to assign color values 
+  scale_color_manual(values = c('Montana' = 'red', 
+                               'Synthetic Montana' = 'blue',
+                               'Augmented Synthetic Montana' = 'green')) +
+  geom_vline(aes(xintercept = 2016)) +
+  # themes
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  # labels 
+  ggtitle('Montana, Synthetic Montana, and Augmented Synthetic Montana') +
+  xlab('Year') +
+  ylab('Uninsured Rate')
+```
+Kasey I tried so hard to get synthetic Monatana to show up but I just could not....
 **HINT**: Is there any preprocessing you need to do before you allow the program to automatically find weights for donor states?
 
 ## Discussion Questions
@@ -589,12 +609,102 @@ Do the following:
 
 ```{r}
 # multisynth model states
+# Prepare data for multisynth 
+medicaid_multi_ready <- medicaid_expansion_full %>%
+  # Create binary treatment indicator based on adoption year
+  mutate(
+    cbr = ifelse(!is.na(Date_Adopted) & year >= as.numeric(format(Date_Adopted, "%Y")), 1, 0)
+  )
+
+# Run multisynth with default nu
+# ---------
+ppool_syn <- multisynth(uninsured_rate ~ cbr, 
+                        State,                        # unit
+                        year,                         # time
+                        medicaid_multi_ready,         # data 
+                        n_leads = 6)                  # post-treatment periods to estimate
+
+# View results 
+print(ppool_syn$nu)
+
+# Get summary stats
+# ---------
+ppool_syn_summ <- summary(ppool_syn)
+
+# Plot all states (this might be crowded)
+# ---------
+ppool_syn_summ$att %>%
+  ggplot(aes(x = Time, y = Estimate, color = Level)) +
+  geom_point() +
+  geom_line() +
+  geom_vline(xintercept = 0) +
+  theme_minimal() +
+  theme(axis.title = element_text(),
+        legend.position = "bottom") +
+  ggtitle('Synthetic Controls for Medicaid Expansion') +
+  xlab('Time') +
+  ylab('Uninsured Rate Estimate')
+
+# Plot with facets for better readability
+# ---------
+ppool_syn_summ$att %>%
+  ggplot(aes(x = Time, y = Estimate, color = Level)) +
+  geom_point() +
+  geom_line() +
+  geom_vline(xintercept = 0) +
+  theme_minimal() +
+  theme(axis.title = element_text(),
+        legend.position = 'None') +
+  ggtitle('Synthetic Controls for Medicaid Expansion') +
+  xlab('Time') +
+  ylab('Uninsured Rate Effect') +
+  facet_wrap(~Level)   # facet-wrap by level (state in this case) for clearer presentation
 ```
 
 - Estimate a multisynth model using time cohorts. For the purpose of this exercise, you can simplify the treatment time so that states that adopted Medicaid expansion within the same year (i.e. all states that adopted epxansion in 2016) count for the same cohort. Plot the treatment effects for these time cohorts.
 
 ```{r}
 # multisynth model time cohorts
+# Run multisynth by time cohorts
+# ---------
+ppool_syn_time <- multisynth(uninsured_rate ~ cbr, 
+                             State,
+                             year,
+                             medicaid_multi_ready,
+                             n_leads = 6,
+                             time_cohort = TRUE)
+
+# Get summary stats
+# ---------
+ppool_syn_time_summ <- summary(ppool_syn_time)
+
+# Plot cohort effects
+# ---------
+ppool_syn_time_summ$att %>%
+  ggplot(aes(x = Time, y = Estimate, color = Level)) +
+  geom_point() +
+  geom_line() +
+  geom_vline(xintercept = 0) +
+  theme_minimal() +
+  theme(axis.title = element_text(),
+        legend.position = "bottom") +
+  ggtitle('Synthetic Controls for Medicaid Expansion by Adoption Cohort') +
+  xlab('Time') +
+  ylab('Uninsured Rate Effect')
+```
+```{r}
+ppool_syn_time_summ$att %>%
+  ggplot(aes(x = Time, y = Estimate, color = Level)) +
+  geom_point() +
+  geom_line() +
+  geom_vline(xintercept = 0) +
+  theme_fivethirtyeight() +  # Make sure this theme is loaded
+  theme(axis.title = element_text(),
+        legend.position = 'None') +
+  ggtitle('Synthetic Controls for Medicaid Expansion') +
+  xlab('Time') +
+  ylab('Uninsured Rate Effect') +
+  facet_wrap(~Level)
 ```
 
 ## Discussion Questions
