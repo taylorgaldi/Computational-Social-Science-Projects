@@ -291,12 +291,12 @@ post_diff <- cg %>%
 diff_in_diffs <- post_diff - pre_diff
 diff_in_diffs
 ```
-I think this means that California's uninsured rate went down bt -0.01648 from the pre-treatment year (2013) to the post-treatment year (2014). I will come back and do this with averages over pre and post treatment years if I have time...
+I think this means that California's uninsured rate went down by -0.01648 from the pre-treatment year (2013) to the post-treatment year (2014). 
 
 ## Discussion Questions
 
 - Card/Krueger's original piece utilized the fact that towns on either side of the Delaware river are likely to be quite similar to one another in terms of demographics, economics, etc. Why is that intuition harder to replicate with this data?
-Like discussed above, the trade-off between choosing two states whose parallel trend lines are more convincing and ones whose policy context seem similar is actually more difficult than one might imagine; as we saw above, places with seemingly similar policy contexts (neighboring states with similar populations and mean rates of uninsured population) often had really wonky parallel trends that were often thrown off by just one year. Maybe it's not even fair to assume that geographically neighboring or similar (e.g. comparing two midwestern states) states would have similar policy contexts, but it definitely seems more intuitive that Georgia is more similar to Florida than it is to California. But I think that would be the intuition of Card/Krueger that can't be applied here; two neighboring towns are probably more likely to be similar than two neighboring states, but even that feels like a stretch. Two towns that are split by some geographical feature might have differences - see the construction of highways in Oakland. 
+Like discussed above, the trade-off between choosing two states whose parallel trend lines are more convincing and ones whose policy context seem similar is actually more difficult than one might imagine; as we saw above, places with seemingly similar policy contexts (neighboring states with similar populations and mean rates of uninsured population) often had really wonky parallel trends that were often thrown off by just one year. Maybe it's not even fair to assume that geographically neighboring or similar (e.g. comparing two midwestern states) states would have similar policy contexts, but it definitely seems more intuitive that Georgia is more similar to Florida than it is to California. But I think that would be the intuition of Card/Krueger that can't be applied here; two neighboring towns are probably more likely to be similar than two neighboring states, but even that feels like a stretch. Two towns that are split by some geographical feature might have differences - see the construction of highways in Oakland. Even though I think Card/Krueger's paper was two different states (if I remember this discussion right), two towns that share a border in two states is a different scale than we're looking at.
 
 - What are the strengths and weaknesses of using the parallel trends assumption in difference-in-differences estimates?
 I think the strength is how powerful the visual aspect of parallel trends is. Even though it is subjective, if you see two lines that basically have the same exact slope,it's hard to argue with that. My California/Georgia example may not be the best, but if it were a little better visually, the existence of the parallel trends visually will kind of rebut claims that these places are too different to compare. Meaning, if the outcome of interest is trending in the same exact ways in these two places, it seems likely that no matter how different they are, covariates are seemingly impacting them in the same way. I think the weakness for me, as mentioned, is also the visual aspect and the fact that it is not really a mathematical formulation of "parallelness," like there's no universal standard, it's just sort of a visual thing that your reviewers may or may not be convinced by. I guess the upshot of that is anyone who is doing serious diff-in-diff work probably is really good at defending their analytical choices to stave off criticisms for those who are typically unconvinced by parallel trends!
@@ -323,6 +323,7 @@ adopted_post2014 <- medicaid_expansion_full %>%
 
 view(adopted_post2014)
 #I'm not sure if I should be using some theory-informed state for the synthetic control, but my gut is telling me to pick a state that adopted on New Years day of some year. Earlier in the notebook it said don't choose 2014 or 2015 for DiD, so I won't choose either. Therefore, I'll choose 01-01-2016 as my date, which hopefully will still give me enough data post-treatment.
+#Redoing this all to take out treatment states
 treated_state <- "Montana"
 treatment_year <- medicaid_expansion_full %>%
   filter(State == treated_state) %>%
@@ -331,10 +332,18 @@ treatment_year <- medicaid_expansion_full %>%
   as.Date() %>%
   format("%Y") %>%
   as.numeric()
-# Clean data
+
+# Identify states that never expanded Medicaid (proper controls)
+# Flag for the proper donors (control states)
+never_expanded_states <- medicaid_expansion_full %>%
+  filter(is.na(Date_Adopted)) %>%  # Only keep states that never adopted
+  distinct(State) %>%
+  pull(State)
+
 medicaid_clean <- medicaid_expansion_full %>%
   mutate(
-    treatment = ifelse(State == treated_state & year >= treatment_year, 1, 0)
+    treatment = ifelse(State == "Montana" & year >= 2016, 1, 0),
+    is_proper_donor = State %in% never_expanded_states
   )
 
 # Run non-augmented synthetic control
@@ -365,12 +374,6 @@ cat("Non-Augmented L2 Imbalance:", non_aug_l2, "\n")
 
 
 ```{r}
-# plot
-plot(syn)
-```
-
-
-```{r}
 weights_df <- data.frame(syn$weights) %>%
   tibble::rownames_to_column('State') %>%
   rename(syn_weight = syn.weights)
@@ -385,12 +388,12 @@ ggplot(weights_df) +
   theme_fivethirtyeight() +
   theme(axis.title = element_text()) +
   labs(
-    title = "Synthetic Control Weights",
+    title = "Non-Augmented Synthetic Control Weights",
     x = "State",
     y = "Weight"
   )
 ```
-Okay, only a few states are donors (is that the right terminology?) for our synthetic control.
+Okay, only a few states are donors (is that the right terminology?) for our synthetic control. It looks like Alaska, Nevada, South Dakota, and Wisconsin are our donor states but like the class notebook, lets look closer at the ones that actually contribtued. Is it a problem that Alaska's contribution is so outsized?
 
 ```{r}
 # view each state's contribution, where weights are greater than 0
@@ -411,67 +414,33 @@ data.frame(syn$weights) %>%
   theme_fivethirtyeight() +
   theme(axis.title = element_text()) +
   # labels
-  ggtitle('Synthetic Control Weights') +
+  ggtitle('Non- Augmented Synthetic Control Weights') +
   xlab('State') +
   ylab('Weight')
 ```
-```{r}
-#Use tidysynth to visualize 
-library(tidysynth)
 
-medicaid_out <- medicaid_clean %>%
-  synthetic_control(
-    outcome = uninsured_rate,
-    unit = State,
-    time = year,
-    i_unit = "Montana",      # Treated unit
-    i_time = 2016,           # Intervention time
-    generate_placebos = TRUE
-  ) %>%
-  # Use a different approach to generate predictors
-  generate_predictor(
-    time_window = 2008:2013,
-    avg_uninsured = mean(uninsured_rate, na.rm = TRUE)  # Use a summary statistic instead
-  ) %>%
-  generate_weights(optimization_window = 2008:2015) %>%
-  generate_control()
-```
+Yeah so it's Alaska, Nevada, South Dakota, Utah (couldn't see that ont eh first graph) and West Virginia. Interesting I guess, I have no sort of domain knowledge of why this might be the case.
 
-
-```{r}
-#Plot trends for Montana vs synthetic Montana
-medicaid_out %>% plot_trends()
-```
-```{r}
-#Plot the differences (gap between actual and synthetic Montana)
-medicaid_out %>% plot_differences()
-```
-```{r}
-#Plot placebos (other donor states) vs observed Montana
-medicaid_out %>% plot_placebos()
-```
-```{r}
-#Plot control weights of each other state
-medicaid_out %>% plot_weights()
-```
-...uhhh why is Nevada the only donor state basically...
-also why is it the avg_unisnured
 
 - Re-run the same analysis but this time use an augmentation (default choices are Ridge, Matrix Completion, and GSynth). Create the same plot and report the average ATT and L2 imbalance.
 
 ```{r}
 # augmented synthetic control
-aug_syn <- augsynth(
+# Filter the data to only include Montana and never-expanded states (if you can't tell, Kasey, I'm redoing this after I first ran the ridge with little success - I was using everything as possible donors)
+filtered_data <- medicaid_clean %>% 
+  filter(State == "Montana" | State %in% never_expanded_states)
+
+# Then run augsynth
+ridge_syn <- augsynth(
   uninsured_rate ~ treatment, 
-  unit = State, 
-  time = year, 
-  data = medicaid_clean,
-  progfunc = "ridge", # Using ridge regression for augmentation
+  State,
+  year, 
+  filtered_data,
+  progfunc = "ridge",
   scm = TRUE
 )
-
 # Extract the ATT and L2 Imbalance using the same approach as before (same issue getting ATT)
-summary_aug_text <- capture.output(summary(aug_syn))
+summary_aug_text <- capture.output(summary(ridge_syn))
 aug_att_line <- summary_aug_text[grep("Average ATT Estimate", summary_aug_text)]
 aug_l2_line <- summary_aug_text[grep("L2 Imbalance", summary_aug_text)]
 
@@ -480,124 +449,127 @@ aug_att <- as.numeric(str_extract(aug_att_line, "[-]?\\d+\\.\\d+"))
 aug_l2 <- as.numeric(str_extract(aug_l2_line, "[-]?\\d+\\.\\d+"))
 
 # Print out the results
+cat("Non-Augmented ATT:", non_aug_att, "\n")
 cat("Augmented ATT:", aug_att, "\n")
 cat("Augmented L2 Imbalance:", aug_l2, "\n")
 cat("Non-Augmented L2 Imbalance (for comparison):", non_aug_l2, "\n")
 ```
-```{r}
-plot(aug_syn)
-```
-
+Um, so it actually seems like our ridge L2 imbalance is worse than our non-augmented L2 imbalance. But at the same time, the ridge ATT is more negative than the non-augmented synthetic control, suggesting a more negative effect of medicaid expansion on uninsured rates. So the ridge seems to worsen the pre-treatment balance, it estimated a larger treatment effect. I'm unclear where this leaves me - which metric takes priority - I'm assuming it's the L2 over the ATT.
 - Plot barplots to visualize the weights of the donors.
 
 ```{r}
 # barplots of weights
-weights_plot <- data.frame(aug_syn$weights) %>% 
+weights_plot <- data.frame(ridge_syn$weights) %>% 
   tibble::rownames_to_column('State') %>% 
-  filter(aug_syn.weights > 0) %>% 
+  filter(ridge_syn.weights > 0) %>% 
   ggplot() + 
-  geom_bar(aes(x = reorder(State, aug_syn.weights), y = aug_syn.weights), 
+  geom_bar(aes(x = reorder(State, ridge_syn.weights), y = ridge_syn.weights), 
            stat = 'identity', fill = "steelblue") + 
   coord_flip() + 
   theme_minimal() + 
   labs(
-    title = "Augmented Synthetic Control Weights", 
+    title = "Ridge Synthetic Control Weights", 
     x = "State", 
     y = "Weight"
   )
 
 print(weights_plot)
 ```
-...why are none of the weights negative
+**HINT**: Is there any preprocessing you need to do before you allow the program to automatically find weights for donor states?
+Oh...I guess I thought I could use states that had a different treatment time but I think the donors have to be untreated?
+YAY earlier I was getting that only Nevada was a donor state. I feel like in class we talked about negative weights and that they're not a bad thing (because I had asked this question assuming negative is bad), and the 6-6 notebook also has negative weights in the ridge synthetic control, but it's not inherently a bad thing that my ridge doesn't have negative weights, right?
 ```{r}
 # Create a comparison plot between actual, non-aug synthetic, and ridge Montana
-#Kasey I tried so hard to put all three on the same graph using the 6-6 notebook and it just would not work I'm sorry... so here's ridge vs  observed
-# Create a tidysynth object for the ridge-augmented version
-medicaid_out_ridge <- medicaid_clean %>%
-  synthetic_control(
-    outcome = uninsured_rate,
-    unit = State,
-    time = year,
-    i_unit = "Montana",
-    i_time = 2016,
-    generate_placebos = TRUE
-  ) %>%
-  # Use ridge regression for augmentation
-  generate_predictor(
-    time_window = 2008:2013,
-    avg_uninsured = mean(uninsured_rate, na.rm = TRUE)
-  ) %>%
-  # In tidysynth, ridge augmentation can be specified in the weights function
-  generate_weights(
-    optimization_window = 2008:2015,
-    ridge_penalty = 0.1  # Add a ridge penalty
-  ) %>%
-  generate_control()
-
-# Plot the ridge-augmented results
-medicaid_out_ridge %>% plot_trends()
-medicaid_out_ridge %>% plot_differences()
-```
-
-```{r}
-# Create a dataset specifically comparing the two synthetic controls, ridge and non-aug
-# ---------
-# Get summaries from both models
+# Get the summary objects for both syn and aug_syn
 syn_sum <- summary(syn)
-aug_syn_sum <- summary(aug_syn)
+aug_syn_sum <- summary(ridge_syn)
 
-# Create Montana with synthetic controls - IMPORTANT: Subtract ATT not add it
-montana_synmontana <- 
-  # data
-  medicaid_clean %>%   
-  # filter just Montana 
-  filter(State == "Montana") %>% 
-  # Create synthetic Montana values by SUBTRACTING the ATT 
-  # (since negative ATT means uninsured rate decreased)
+# Create a dataset for Montana actual values
+montana_actual <- medicaid_clean %>%
+  filter(State == "Montana")
+
+# Now create a new dataframe that combines all three lines
+montana_comparison <- montana_actual %>%
+  select(year, uninsured_rate) %>%
+  # Add columns for synthetic values and augmented synthetic values
   mutate(
-    synthetic_montana = uninsured_rate + non_aug_att,
-    aug_synthetic_montana = uninsured_rate + aug_att
+    synthetic_montana = NA_real_,
+    ridge_synthetic_montana = NA_real_
   )
 
-# Plot all three lines
-montana_synmontana %>%
+# We need to populate the synthetic values for the years where we have estimates
+# Extract the years and estimates from the summary objects
+syn_years <- syn_sum$att$Time
+syn_estimates <- syn_sum$att$Estimate
+
+aug_syn_years <- aug_syn_sum$att$Time
+aug_syn_estimates <- aug_syn_sum$att$Estimate
+
+# Now fill in the synthetic values for the years we have data
+for (i in 1:length(syn_years)) {
+  year_match <- syn_years[i]
+  if (year_match %in% montana_comparison$year) {
+    # For a given year, the synthetic value is the actual value minus the estimate
+    # (since estimate = actual - synthetic)
+    montana_row <- which(montana_comparison$year == year_match)
+    actual_value <- montana_comparison$uninsured_rate[montana_row]
+    montana_comparison$synthetic_montana[montana_row] <- actual_value - syn_estimates[i]
+  }
+}
+
+# Do the same for augmented synthetic
+for (i in 1:length(aug_syn_years)) {
+  year_match <- aug_syn_years[i]
+  if (year_match %in% montana_comparison$year) {
+    montana_row <- which(montana_comparison$year == year_match)
+    actual_value <- montana_comparison$uninsured_rate[montana_row]
+    montana_comparison$ridge_synthetic_montana[montana_row] <- actual_value - aug_syn_estimates[i]
+  }
+}
+
+# Now create the plot
+montana_comparison %>%
   ggplot() +
-  # Montana actual
+  # Montana actual line
   geom_line(aes(x = year, 
                 y = uninsured_rate, 
-                color = 'Montana')) +
-  # Synthetic Montana (non-augmented)
+                color = 'Montana'), size = 1) +
+  # Synthetic Montana line
   geom_line(aes(x = year, 
                 y = synthetic_montana, 
-                color = 'Synthetic Montana')) +
-  # Augmented Synthetic Montana
+                color = 'Synthetic Montana'), size = 1) +
+  # Ridge Synthetic Montana line
   geom_line(aes(x = year, 
-                y = aug_synthetic_montana, 
-                color = 'Augmented Synthetic Montana')) +
-  # Use scale color manual to assign color values 
+                y = ridge_synthetic_montana, 
+                color = 'Ridge Synthetic Montana'), size = 1) +
+  # Color scale
   scale_color_manual(values = c('Montana' = 'red', 
-                               'Synthetic Montana' = 'blue',
-                               'Augmented Synthetic Montana' = 'green')) +
+                              'Synthetic Montana' = 'blue',
+                              'Ridge Synthetic Montana' = 'green')) +
+  # Add vertical line at treatment year (2016)
   geom_vline(aes(xintercept = 2016)) +
-  # themes
+  # Theming
   theme_fivethirtyeight() +
-  theme(axis.title = element_text()) +
-  # labels 
-  ggtitle('Montana, Synthetic Montana, and Augmented Synthetic Montana') +
+  theme(axis.title = element_text(),
+        legend.position = "bottom",
+        legend.title = element_blank()) +
+  # Labels
+  ggtitle('Montana, Synthetic Montana, and Ridge Synthetic Montana') +
   xlab('Year') +
   ylab('Uninsured Rate')
 ```
-Kasey I tried so hard to get synthetic Monatana to show up but I just could not....
-**HINT**: Is there any preprocessing you need to do before you allow the program to automatically find weights for donor states?
+YAY before my ridge and my non-augmented synthetic were exactly the same but now we can see that they're different, with the actual Montana having the lowest rates of unisured people post-treatment, followed by the synthetic and then the ridge having the highest. I guess alarming is the fact that pretreatment, observed rates of uninsured people dropped a lot in real life right before the treatment whereas both ridge and non-auugmented synthetic didn't drop so dramatically right before treatment, so maybe that indicates that phenomenon we talked about in class (anticipation bias, maybe it was called?) where people know a treatment is coming and act accordingly. We also see that dip in 2010 in observed Montana whereas ridge and non-augmented synthetic isn't so severe, so again maybe that is an instance in which real historical events in Montana impacted rates of uninsured people in ways that the models can't necessarily account for. I'm also confused how this can be the results when the ATT score was more negative for the ridge.
 
 ## Discussion Questions
 
 
 - What are the advantages and disadvantages of synthetic control compared to difference-in-differences estimators?
 - **Answer**: 
+Well we already talked about the pros and cons of diff-in-diff (or at least my biased opinion), but I sort of think of synthetic control like the more ideal version of diff-and-diff. By that I mean that diff-and-diff and synthetic control both have similar aims - to try and estimate what the counterfactual would be without treatment, but whereas diff-and-diff is in some ways more intuitive, synthetic control requires a lot more work in order to construct the counterfactual. In some ways that's an upshot, since it takes out some of the guess work that we saw is required of diff-and-diff, but in some ways, like in my notebook, we can see the downsides of having to make these choices. For example, various different choices that I made impacted the synthetic control results both for the non and augmented versions. The states included, the penalties, the type of augmentation, these all impact the results in a way that is less self-evident unless you're playing around with the different choices like I did here. 
 
 - One of the benefits of synthetic control is that the weights are bounded between [0,1] and the weights must sum to 1. Augmentation might relax this assumption by allowing for negative weights. Does this create an interpretation problem, and how should we balance this consideration against the improvements augmentation offers in terms of imbalance in the pre-treatment period?
 - **Answer**:
+Well I (unfortunately?) did not have that issue here, but yes, I think intuitively that seems like it would create an interpretation problem. If synthetic control weights must sum to 1, but we have negative weights, it's harder to understand what it means to contribute to the model. Like it is intutive to me that a positive weight is contributing to the model, but it is less intutive how a negative weight contributes in the same way. With respect to the fact that augmentation improves imbalance (again, didn't happen for me lol), from this question I am inferring that the lessened imbalance that comes from the possibility of negative weights in the augmented model comes at the expense of the interpretibility of the non-augmented synthetic control that (is supposed to) has more pre-treatment imbalance than an augmented one. 
 
 # Staggered Adoption Synthetic Control
 
@@ -631,94 +603,109 @@ print(ppool_syn$nu)
 # ---------
 ppool_syn_summ <- summary(ppool_syn)
 
-# Plot all states (this might be crowded)
-# ---------
-ppool_syn_summ$att %>%
-  ggplot(aes(x = Time, y = Estimate, color = Level)) +
-  geom_point() +
-  geom_line() +
-  geom_vline(xintercept = 0) +
-  theme_minimal() +
-  theme(axis.title = element_text(),
-        legend.position = "bottom") +
-  ggtitle('Synthetic Controls for Medicaid Expansion') +
-  xlab('Time') +
-  ylab('Uninsured Rate Estimate')
+# Calculate average treatment effect for each state
+state_effects <- ppool_syn_summ$att %>%
+  filter(Level != "Average") %>%
+  group_by(Level) %>%
+  summarize(
+    avg_effect = mean(Estimate, na.rm = TRUE)
+  ) %>%
+  arrange(avg_effect)  # Sort by effect size
 
-# Plot with facets for better readability
-# ---------
+# Get the top weights from the non-aug synthetic control
+top_contributors <- data.frame(syn$weights) %>%
+  tibble::rownames_to_column('State') %>%
+  filter(syn.weights > 0) %>%
+  arrange(desc(syn.weights)) %>%
+  head(8) %>%  # Take top 8 states with highest weights
+  pull(State)
+
+# Create a focused plot with just Montana, top contributors, and Average
+focused_states <- c("Montana", top_contributors, "Average")
+
+# Create a more readable plot with fewer states
 ppool_syn_summ$att %>%
+  filter(Level %in% focused_states) %>%
+  # Restrict to dataset timre range
+  filter(Time >= -6 & Time <= 6) %>%  # Show 6 years before to 6 years after expansion
   ggplot(aes(x = Time, y = Estimate, color = Level)) +
   geom_point() +
-  geom_line() +
-  geom_vline(xintercept = 0) +
-  theme_minimal() +
+  geom_line(size = 1) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "gray50") +
+  theme_fivethirtyeight() +
   theme(axis.title = element_text(),
-        legend.position = 'None') +
-  ggtitle('Synthetic Controls for Medicaid Expansion') +
-  xlab('Time') +
-  ylab('Uninsured Rate Effect') +
-  facet_wrap(~Level)   # facet-wrap by level (state in this case) for clearer presentation
+        legend.position = "bottom",
+        legend.title = element_blank()) +
+  ggtitle('Treatment Effects: Montana vs. Top Synthetic Control Donors') +
+  xlab('Time Relative to Expansion') +
+  ylab('Effect on Uninsured Rate')
 ```
+Cool, so this is showing me the average treatment effects for the top donor states of my non-augmented synthetic control vs. Montana. I wish I wasn't colorblind, but I think Montana is kind of in the middle there, but has a larger negative ATT than the average, and I think our top donor was Alaska, which has a more positive ATT than Montana at most points. 
 
 - Estimate a multisynth model using time cohorts. For the purpose of this exercise, you can simplify the treatment time so that states that adopted Medicaid expansion within the same year (i.e. all states that adopted epxansion in 2016) count for the same cohort. Plot the treatment effects for these time cohorts.
 
 ```{r}
 # multisynth model time cohorts
-# Run multisynth by time cohorts
-# ---------
+# Create cohorts directly from the adoption dates
+medicaid_cohorts <- medicaid_expansion_full %>%
+  # Create a treatment indicator based on adoption date
+  mutate(
+    # Extract just the year from the date for cohort grouping (I can't believe I didn't have to do this earlier in the notebook)
+    cohort_year = case_when(
+      is.na(Date_Adopted) ~ NA_real_,  # Never expanded
+      TRUE ~ as.numeric(format(Date_Adopted, "%Y"))
+    ),
+    # Create treatment indicator
+    cbr = ifelse(!is.na(Date_Adopted) & year >= cohort_year, 1, 0)
+  )
+
+# Run multisynth with these time cohorts
 ppool_syn_time <- multisynth(uninsured_rate ~ cbr, 
-                             State,
-                             year,
-                             medicaid_multi_ready,
-                             n_leads = 6,
-                             time_cohort = TRUE)
+                           State,
+                           year,
+                           medicaid_cohorts,
+                           n_leads = 6,
+                           time_cohort = TRUE)
 
 # Get summary stats
-# ---------
 ppool_syn_time_summ <- summary(ppool_syn_time)
 
-# Plot cohort effects
-# ---------
+# Plot with facets
 ppool_syn_time_summ$att %>%
+  # Filter to a reasonable time range
+  filter(Time >= -6 & Time <= 6) %>%
   ggplot(aes(x = Time, y = Estimate, color = Level)) +
   geom_point() +
-  geom_line() +
-  geom_vline(xintercept = 0) +
-  theme_minimal() +
-  theme(axis.title = element_text(),
-        legend.position = "bottom") +
-  ggtitle('Synthetic Controls for Medicaid Expansion by Adoption Cohort') +
-  xlab('Time') +
-  ylab('Uninsured Rate Effect')
-```
-```{r}
-ppool_syn_time_summ$att %>%
-  ggplot(aes(x = Time, y = Estimate, color = Level)) +
-  geom_point() +
-  geom_line() +
-  geom_vline(xintercept = 0) +
-  theme_fivethirtyeight() +  # Make sure this theme is loaded
+  geom_line(size = 1) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "gray50") +
+  theme_fivethirtyeight() +
   theme(axis.title = element_text(),
         legend.position = 'None') +
-  ggtitle('Synthetic Controls for Medicaid Expansion') +
-  xlab('Time') +
-  ylab('Uninsured Rate Effect') +
+  ggtitle('Medicaid Expansion Effects by Adoption Year Cohort') +
+  xlab('Time Relative to Expansion') +
+  ylab('Effect on Uninsured Rate') +
   facet_wrap(~Level)
 ```
-
+What is most concerning to me is that for all of the cohorts, there is a pretty significant drop right before treatment time (0). So is this indicating that the effect we're seeing might not be from the expansion itself, but from something that seems to be coming before the expansion? 
 ## Discussion Questions
 
 - One feature of Medicaid is that it is jointly administered by the federal government and the states, and states have some flexibility in how they implement Medicaid. For example, during the Trump administration, several states applied for waivers where they could add work requirements to the eligibility standards (i.e. an individual needed to work for 80 hours/month to qualify for Medicaid). Given these differences, do you see evidence for the idea that different states had different treatment effect sizes?
 - **Answer**: 
+Hm that's interesting because I've mainly been looking at time rather than the attributes of individual states throughout this project, but I guess we can see in the first multisynth regarding donors that if we're normalizing time, that there are still differences in ATT between states. So yes, I guess that would indicate that different states have different treatment effect sizes. But in retrospect, I probably should have looked at both geograhy and time rather than thinking mostly about time of expansion. 
 
 - Do you see evidence for the idea that early adopters of Medicaid expansion enjoyed a larger decrease in the uninsured population?
 - **Answer**: 
+I mean kind of... I think we can see evidence of that in this last multisynth plot, but I guess I also think we would be cautious because look at the time horizons for effects for 2019 and 2020 (late adopters) vs the available data for the early adopting states. To be more confident, I think I would just want more data post-treatment for all cohorts to be sure. 
 
 # General Discussion Questions
 
 - Why are DiD and  synthetic control estimates well suited to studies of aggregated units like cities, states, countries, etc?
 - **Answer**:
+If I can recall back from class, I think we talked about the utility of having similar data/data collection across the same types of units, which is necessary to make the comparisons for Diff and diff and synthetic control. For example, in this study we're looking at state-level medicaid data, so (redundantly but importantly) we know this is being implemented at the level of the state, so that constant unit of analysis to study the treatment allows us to construct these comparisons, particularly in situations where there is variation, such as our staggered adoption. 
 
 - What role does selection into treatment play in DiD/synthetic control versus regression discontinuity? When would we want to use either method?
 - **Answer**:
+We know that medicaid expansion can be impacted by states selecting into treatment (see the above example provided in one of the discussion question prompts) - the decision when, how, and if to expand medicaid is presumably related to the outcome of interest. This is the strength of thinking about pre-treatment trends and covariates, so that when we look at the effect that medicaid expansion has on rates of uninsured populations, we have constructed our counterfactuals to hopefully help us understand the impact that these observed/unobserved factors have relative to the treatment itself.
+With regression discontinuity, we pick a cutoff point and look at the differences of those just above or just below the cutoff, with the assumption that these observations are similar such that whether or not they are in the treatment group is not due to differences in covariates - it is essentially as if it were random. That sort of "cutoff" logic doesn't really make sense in this context, that logic (and RD) makes more sense when we're thinking about something like test scores or income thresholds where we can get a sense of the formula of selection into treatment in order to determine a cutoff threshold. 
