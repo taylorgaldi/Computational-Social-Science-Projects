@@ -19,11 +19,11 @@ pacman::p_load(
   ggdag,
   here)
 # Set a CRAN mirror
-#options(repos = c(CRAN = "https://cloud.r-project.org"))
+options(repos = c(CRAN = "https://cloud.r-project.org"))
 #install.packages(c("future", "furrr"))
-#library(here)
-#set_here("/Users/taylorgaldi/git/Computational-Social-Science-Projects/Project 8")
-heart_disease <- read_csv(here('heart_disease_tmle.csv'))
+library(here)
+here()
+heart_disease <- readr::read_csv(here("Project 8", "heart_disease_tmle.csv"))
 colnames(heart_disease)
 # set seed
 # ----------
@@ -73,16 +73,17 @@ Fit a SuperLearner model to estimate the probability of someone dying from compl
 
 ```{r}
 # Fit SuperLearner Model
-
+#listWrappers()
 ## sl lib
 #install.packages("SuperLearner")
-#install.packages(c("SuperLearner", "gam", "earth"))
+#install.packages(c("gam", "earth"))
+#install.packages("ranger")
 library("SuperLearner")
-sl_libs <- c('SL.mean', 'SL.glm', 'SL.step', 'SL.gam', 'SL.earth')
+#Picking different algorithms because three had coefficients of zero lol
+sl_libs <- c('SL.mean', 'SL.glm', 'SL.earth', 'SL.ranger', 'SL.step')
 
-# Load the packages
-library(future)
-library(furrr)
+#library(future)
+#library(furrr)
 ## Train/Test split
 # initial split
 # ----------
@@ -156,30 +157,27 @@ preds <-
 
 
 # start with y_test
-# identify number of cores to use
-n_cores <- availableCores() - 1 # maybe 2 cores instead?
 
-
-# plan separate session 
-plan(multisession, 
-     workers = n_cores) 
 
 # set seed - option will set same seed across multiple cores
 set.seed(44, "L'Ecuyer-CMRG")
+# Identify number of cores to use
+n_cores <- parallelly::availableCores() - 1
 
-# cross-validation across cores
-# ----------
+# Plan separate session 
+plan(multisession, workers = n_cores)
+
+# Set seed - option will set same seed across multiple cores
+set.seed(44, "L'Ecuyer-CMRG")
+
+# Cross-validation across cores
 cv_sl = CV.SuperLearner(Y = y_train, 
                         X = x_train, 
-                        family = binomial(),      #
-                        V = 20,                   # default fold recommendation for Superlearner 
-                        parallel = 'multicore',   # macs linux parallel specification, note its a string
-                        SL.library = sl_libs)
-
-# plot
-#plot(cv_sl)
-## Confusion Matrix
-# ----------
+                        family = binomial(),
+                        V = 15,                   # 
+                        parallel = 'multicore',   # Still use 'multicore' with SuperLearner
+                        SL.library = sl_libs)     # my chosen algorithms
+# Confusion Matrix (keep your original code)
 validation <- 
   y_test %>%
   # add our predictions - first column of predictions
@@ -189,12 +187,15 @@ validation <-
          pred = `...2`) %>% # predicted prob
   # change pred column so that obs above .5 are 1, otherwise 0
   mutate(pred = ifelse(pred >= .5, 
-                           1,
-                           0))
+                       1,
+                       0))
 
 # Create confusion matrix
 conf_matrix <- caret::confusionMatrix(as.factor(validation$pred), as.factor(validation$obs))
 conf_matrix
+
+# Clean up parallel workers when done
+plan(sequential)
 ```
 
 ## Discussion Questions
