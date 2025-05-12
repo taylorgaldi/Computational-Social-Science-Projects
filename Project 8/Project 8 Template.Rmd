@@ -1,10 +1,12 @@
 ---
 title: "Project 8 Template"
-output: pdf_document
+output:
+  html_document: default
 ---
 
 ```{r}
 # Add to this package list for additional SL algorithms
+if (!require("pacman")) install.packages("pacman")
 pacman::p_load(
   tidyverse,
   ggthemes,
@@ -16,8 +18,16 @@ pacman::p_load(
   dagitty,
   ggdag,
   here)
-
+# Set a CRAN mirror
+#options(repos = c(CRAN = "https://cloud.r-project.org"))
+#install.packages(c("future", "furrr"))
+#library(here)
+#set_here("/Users/taylorgaldi/git/Computational-Social-Science-Projects/Project 8")
 heart_disease <- read_csv(here('heart_disease_tmle.csv'))
+colnames(heart_disease)
+# set seed
+# ----------
+set.seed(44)
 ```
 
 # Introduction
@@ -65,16 +75,126 @@ Fit a SuperLearner model to estimate the probability of someone dying from compl
 # Fit SuperLearner Model
 
 ## sl lib
+#install.packages("SuperLearner")
+#install.packages(c("SuperLearner", "gam", "earth"))
+library("SuperLearner")
+sl_libs <- c('SL.mean', 'SL.glm', 'SL.step', 'SL.gam', 'SL.earth')
 
+# Load the packages
+library(future)
+library(furrr)
 ## Train/Test split
+# initial split
+# ----------
+heart_split <- 
+  initial_split(heart_disease, prop = 3/4) # create initial split (tidymodels)
+
+
+# Training 
+# ----------
+train <- 
+  # Declare the training set with rsample::training()
+  training(heart_split)
+
+# y_train 
+y_train <- train %>% 
+  pull(mortality)  
+
+# x_train  
+x_train <-
+  train %>%
+  # drop the target variable
+  select(-mortality, -ends_with("_2"))  
+
+# Testing 
+# ----------
+test <-  
+  # Declare the training set with rsample::training()
+  testing(heart_split)
+
+# y test
+y_test <- test %>%
+  pull(mortality)
+
+# x test
+x_test <- 
+  test %>%
+  select(-mortality, -ends_with("_2"))
 
 ## Train SuperLearner
+# LASSO 
+# ----------
+sl_lasso <- SuperLearner(Y = y_train,              # target
+                         X = x_train,              # features
+                         family = binomial(),      # binomial : 1,0s
+                         SL.library = "SL.glmnet") # find the glmnet algo from SL
 
+# view
+sl_lasso
 ## Risk and Coefficient of each model
-
+# Here is the risk of the best model (discrete SuperLearner winner).
+# Use which.min boolean to find minimum cvRisk in list
+sl_lasso$cvRisk[which.min(sl_lasso$cvRisk)]
 ## Discrete winner and superlearner ensemble performance
+# set seed
+set.seed(987)
 
+# multiple models  
+# ----------
+sl = SuperLearner(Y = y_train,
+                  X = x_train,
+                  family = binomial(),
+                  # notice these models are concatenated
+                  SL.library =sl_libs)
+sl
+# predictions
+# ----------
+preds <- 
+  predict(sl,             # use the superlearner not individual models
+          x_test,         # prediction on test set
+          onlySL = TRUE)  # use only models that were found to be useful (had weights)
+
+
+# start with y_test
+# identify number of cores to use
+n_cores <- availableCores() - 1 # maybe 2 cores instead?
+
+
+# plan separate session 
+plan(multisession, 
+     workers = n_cores) 
+
+# set seed - option will set same seed across multiple cores
+set.seed(44, "L'Ecuyer-CMRG")
+
+# cross-validation across cores
+# ----------
+cv_sl = CV.SuperLearner(Y = y_train, 
+                        X = x_train, 
+                        family = binomial(),      #
+                        V = 20,                   # default fold recommendation for Superlearner 
+                        parallel = 'multicore',   # macs linux parallel specification, note its a string
+                        SL.library = sl_libs)
+
+# plot
+#plot(cv_sl)
 ## Confusion Matrix
+# ----------
+validation <- 
+  y_test %>%
+  # add our predictions - first column of predictions
+  bind_cols(preds$pred[,1]) %>% 
+  # rename columns
+  rename(obs = `...1`,      # actual observations 
+         pred = `...2`) %>% # predicted prob
+  # change pred column so that obs above .5 are 1, otherwise 0
+  mutate(pred = ifelse(pred >= .5, 
+                           1,
+                           0))
+
+# Create confusion matrix
+conf_matrix <- caret::confusionMatrix(as.factor(validation$pred), as.factor(validation$obs))
+conf_matrix
 ```
 
 ## Discussion Questions
@@ -95,10 +215,41 @@ TMLE requires estimating two models:
 \end{enumerate}
 
 Using ggdag and daggity, draw a directed acylcic graph (DAG) that describes the relationships between the outcome, treatment, and covariates/predictors. Note, if you think there are covariates that are not related to other variables in the dataset, note this by either including them as freestanding nodes or by omitting them and noting omissions in your discussion.
+```{r}
+# DAG for TMLE
+colnames(heart_disease)
+```
 
 ```{r}
 # DAG for TMLE
+library(dagitty)
+library(ggdag)
+library(stringr)
+
+# set dag theme
+# ----------
+theme_set(theme_dag())
+# Load necessary packages
+library(dagitty)
+library(ggdag)
+# heart_dag <- ggdag::dagify(cardiacarrest ~ cholesterol,
+#                                 cholesterol ~ smoking + weight,
+#                                 smoking ~ unhealthy,
+#                                 weight ~ unhealthy,
+#                                 labels = c("cardiacarrest" = "Cardiac\n Arrest", 
+#                                            "smoking" = "Smoking",
+#                                            "cholesterol" = "Cholesterol",
+#                                            "unhealthy" = "Unhealthy\n Lifestyle",
+#                                            "weight" = "Weight")
+#                                 )
+# 
+# ggdag::ggdag(heart_dag, #dag object
+#              text = FALSE, # this means the original names won't be shown
+#              use_labels = "label") + # instead use the new names
+#   theme_void()
 ```
+
+
 
 ## TMLE Estimation
 
@@ -109,6 +260,23 @@ Use the `tmle` package to estimate a model for the effect of blood pressure medi
     \item Use the same outcome model and propensity score model that you specified in the DAG above. If in your DAG you concluded that it is not possible to make a causal inference from this dataset, specify a simpler model and note your assumptions for this step.
     \item Report the average treatment effect and any other relevant statistics
 \end{enumerate}
+
+```{r}
+# set seed for reproducibility
+set.seed(1000)
+
+# implement above all in one step using tmle
+# ----------
+tmle_fit <-
+  tmle::tmle(Y = Y,                  # outcome
+             A = A,                  # treatment
+             W = W,                  # baseline covariates
+             Q.SL.library = sl_libs, # libraries for initial estimate 
+             g.SL.library = sl_libs) # libraries for prob to be in treatment
+
+# view results 
+tmle_fit
+```
 
 ## Discussion Questions
 
@@ -130,6 +298,7 @@ Update your causal diagram to incorporate this new information. \textbf{Note}: I
 
 ```{r}
 # DAG for TMLE
+
 ```
 
 ## LTMLE Estimation
