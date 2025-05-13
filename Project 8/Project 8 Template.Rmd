@@ -23,7 +23,8 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 #install.packages(c("future", "furrr"))
 library(here)
 here()
-heart_disease <- readr::read_csv(here("Project 8", "heart_disease_tmle.csv"))
+#REMINDER: Change here on desktop
+heart_disease <- readr::read_csv(here("heart_disease_tmle.csv"))
 colnames(heart_disease)
 # set seed
 # ----------
@@ -82,7 +83,7 @@ library("SuperLearner")
 #Picking different algorithms because three had coefficients of zero lol
 sl_libs <- c('SL.mean', 'SL.glm', 'SL.earth', 'SL.ranger', 'SL.step')
 
-#library(future)
+library(future)
 #library(furrr)
 ## Train/Test split
 # initial split
@@ -218,8 +219,13 @@ TMLE requires estimating two models:
 Using ggdag and daggity, draw a directed acylcic graph (DAG) that describes the relationships between the outcome, treatment, and covariates/predictors. Note, if you think there are covariates that are not related to other variables in the dataset, note this by either including them as freestanding nodes or by omitting them and noting omissions in your discussion.
 ```{r}
 # DAG for TMLE
-colnames(heart_disease)
+heart_dag <- 
+  heart_disease %>%
+  select(-ends_with("_2"))
+colnames(heart_dag)
 ```
+I found this quite hard not because I thought some things were unrelated like the instructions suggested, but because everything feels related, but it feels hard to untangle the question of direct effects on outcome versus indirect effects. It's also a bit confusing for me because from the PDF I wasn't clear if the blood_pressure_medication tretament (0,1) indicates that the person was offered a medication and potentially didn't take it, or if they might not have been offered it at all. For the former, then there's maybe differences in personal attributes that makes someone more reticent to take medication (race? age? college education?), but for the latter, maybe it's differences in personal attributes that makes a physician less likely to prescribe a patient medication, perhaps due to discrimination (race? sex at birth? income? bmi?). Because if a physician was just going off of tangible, bio/social metrics of the likelihood of heart disease (based on a person's bmi, race, age, cholesterol, sex at birth, and measured blood pressure) when they choose to prescribe someone medication or instead tell them to do exercise more or something like that, then that's a more straightforward story. But if the physician is introducing bias, for example by telling someone with a low bmi but high blood pressure and cholesterol to just exercise more instead of prescribing them medication for something genetic, with assumption that because they're 'healthy looking' medication is not necessary, that's a different story. I guess maybe it doesn't matter since they're both mediators, they just have slightly different nodes? I'm also not a doctor so I don't really know the relationship between blood pressure and cholesterol, do people naturally have high cholesterol without high blood pressure or vice versa? 
+ 
 
 ```{r}
 # DAG for TMLE
@@ -233,23 +239,68 @@ theme_set(theme_dag())
 # Load necessary packages
 library(dagitty)
 library(ggdag)
-# heart_dag <- ggdag::dagify(cardiacarrest ~ cholesterol,
-#                                 cholesterol ~ smoking + weight,
-#                                 smoking ~ unhealthy,
-#                                 weight ~ unhealthy,
-#                                 labels = c("cardiacarrest" = "Cardiac\n Arrest", 
-#                                            "smoking" = "Smoking",
-#                                            "cholesterol" = "Cholesterol",
-#                                            "unhealthy" = "Unhealthy\n Lifestyle",
-#                                            "weight" = "Weight")
-#                                 )
-# 
-# ggdag::ggdag(heart_dag, #dag object
-#              text = FALSE, # this means the original names won't be shown
-#              use_labels = "label") + # instead use the new names
-#   theme_void()
+#I saw this structure of DAG on the internet so let's try it 
+heart_dag <- ggdag::dagify(
+#Outcome
+#Mortality is directly related to whether or not someone takes blood pressure medication, assuming that these other factors (e.g. cholesterol, bmi) are only impacting mortality from heart disease through whether or not someone is taking the blood pressure medication 
+mortality ~ blood_pressure_medication,
+#Treatment
+#People are prescribed blood pressure medication based on the following risk factors/measures a physician would look at:
+blood_pressure_medication ~ age + bmi + sex_at_birth + simplified_race + chol + blood_pressure,
+#Mediators
+#But that bmi, blood pressure, and cholesterol are related to race, college education, sex at birth, and income (food deserts, less time to exercise, stress, pressure to diet, etc.) 
+#I guess I'm thinking of this latter mediator as sort of the social factors that a doctor dosn't really look for in examination, while the treatment is related to the risk factors I think a physician would look at. 
+#Again to simplify things, I'm going to say that BMI is related to race, college education, and income and then further that cholesterol and blood pressure are related to BMI
+#Again, not sure how cholesterol and blood pressure are related so I'm going to map them separately
+#I guess age is not really in my 'social' (i.e. indirect) factors, obviously age is related to income and college education but I guess I don't find that to be a meaningful relationship that it needs its own sub-mediator
+bmi ~ simplified_race + college_educ + income_thousands +sex_at_birth,
+chol~ bmi,
+blood_pressure ~ bmi,
+
+                                 labels = c("mortality" = "Mortality", 
+                                            "blood_pressure_medication" = "Blood\n Pressure\n Meds",
+                                            "chol" = "Cholesterol",
+                                            "bmi" = "BMI",
+                                            "sex_at_birth" = "SAB",
+                                            "college_educ" = "College",
+                                            "simplified_race" = "Race",
+                                            "blood_pressure" = "Blood\n Pressure",
+                                            "income_thousands" = "Income",
+                                            "age"= "Age")
+)
+ 
+ggdag::ggdag(heart_dag, #dag object
+              text = FALSE, # this means the original names won't be shown
+              use_labels = "label") + # instead use the new names
+   theme_void()
 ```
 
+So this is messy! And this is the simplified version! I guess my interpretation is kind of that there are sub-DAGs and then DAGs. As previously mentioned, I could get even more nitpicky and make a relationship between income and college education, etc. but I wanted to focus on the most meaningful relationships. Let's chart one more DAG that is a little more straightforward
+
+```{r}
+simple_dag <- ggdag::dagify(
+#Outcome 
+Y ~ A + W + X,
+#Treatment
+A ~ W + X, 
+# Label the nodes 
+  labels = c(
+    "A" = "Blood\n Pressure\n Meds",        # Treatment 
+    "Y" = "Mortality",        # Outcome (mortality)
+    "W" = "Physician\n Risk\n Assessment",        # Things physicians would look at as risk factors (as described above)
+    "X" = "Social"         # How observed covariates impact these risk factors in ways physicians wouldn't see (as described above)
+  ),
+  
+  # Specify exposure and outcome
+  exposure = "A",
+  outcome = "Y"
+)
+
+ggdag::ggdag(simple_dag, #dag object
+              text = FALSE, # this means the original names won't be shown
+              use_labels = "label") + # instead use the new names
+   theme_void()
+```
 
 
 ## TMLE Estimation
