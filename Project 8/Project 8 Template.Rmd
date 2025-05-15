@@ -280,8 +280,9 @@ ggdag::ggdag(heart_dag, #dag object
 
 So this is messy! And this was the simplified version! Let's chart one more DAG that is a little more straightforward.
 
+
 ```{r}
-##NOTE FOR TAYLOR: Update DAG to control plot
+source("pretty_dag.R")
 simple_dag <- ggdag::dagify(
   # Core relationships
   mortality ~ blood_pressure_medication,
@@ -308,14 +309,64 @@ simple_dag <- ggdag::dagify(
   exposure = "blood_pressure_medication",
   outcome = "mortality"
 )
+# Create diagram manually for more precise control
+library(ggplot2)
 
-# Visualize 
-ggdag::ggdag(simple_dag, #dag object
-              text = FALSE, # this means the original names won't be shown
-              use_labels = "label") + # instead use the new names
-   theme_dag()
+# Define node positions (Idk this is what Claude told me to do when I couldn't map out the relationships simply, I had to manually plot them the way I wanted)
+nodes <- data.frame(
+  name = c("mortality", "blood_pressure_medication", "chol_BP", "age_SAB", "bmi", "race", "income"),
+  label = c("Mortality", "BP Meds", "BP/Chol", "Age/SAB", "BMI", "Race", "Income"),
+  x = c(3, 3, 1, 5, 3, 1.5, 4.5),
+  y = c(0.5, 2.5, 4, 4, 5.5, 7, 7),
+  type = c("outcome", "treatment", "other", "other", "other", "other", "other")
+)
+
+# Define edges 
+edges <- data.frame(
+  from = c("race", "income", "bmi", "chol_BP", "age_SAB", "blood_pressure_medication", 
+           "race", "income"),  # Added race and income
+  to = c("bmi", "bmi", "chol_BP", "blood_pressure_medication", "blood_pressure_medication", "mortality", 
+          "blood_pressure_medication", "blood_pressure_medication") 
+)
+
+# Create edge coordinates 
+edge_coords <- data.frame()
+for(i in 1:nrow(edges)) {
+  from_node <- nodes[nodes$name == edges$from[i], ]
+  to_node <- nodes[nodes$name == edges$to[i], ]
+  
+  edge_coords <- rbind(edge_coords, data.frame(
+    x = from_node$x, 
+    y = from_node$y, 
+    xend = to_node$x, 
+    yend = to_node$y
+  ))
+}
+
+# Create the plot 
+ggplot() +
+  geom_segment(data = edge_coords, 
+               aes(x = x, y = y, xend = xend, yend = yend),
+               arrow = arrow(length = unit(0.3, "cm"), type = "closed"),
+               color = "black", size = 1) +
+  geom_point(data = nodes, 
+             aes(x = x, y = y, color = type), 
+             size = 20) +
+  geom_text(data = nodes,
+            aes(x = x, y = y, label = label),
+            color = "white", size = 3.5) +
+  scale_color_manual(values = c(
+    "treatment" = "#d9534f",
+    "outcome" = "#5bc0de",
+    "other" = "darkgrey"
+  )) +
+  theme_void() +
+  theme(legend.position = "none",
+        plot.margin = margin(40, 50, 60, 50, "pt")) +
+  coord_fixed(ratio = 0.8, expand = TRUE, xlim = c(0, 6), ylim = c(0, 8))
 ```
-
+I'm not sure if I actually believe these are the relationships between variables, but this is my model for simplicity's sake. It goes like this:
+BMI is related to race and income, but not entirely causal (ex. exercise). Someone's blood pressure/cholesterol levels are related to their BMI, but not entirely (ex. genetic factors unrelated to race). Someone receives BP meds based on their blood pressure, cholesterol levels, their age, and their sex at birth, because this is what a physician observes when the patient is screened. Blood pressure and cholesterol are separated from age and sex at birth because although all four are clinical risk factors (e.g. what a physician looks at when they're screening), the former pairing is influenced by race and income whereas the latter pairing is not. So, this is assuming that race and income only affect cholesterol/blood pressure through their effect on BMI. Again, maybe this is not a fair assumption and that race has a relationship to genetic predisposition to high blood pressure/cholesterol, but I'm not going to make that assumption without domain knowledge.We might also say that race and income impact selection into treatment not only through their effects on BMI, but also directly (through access to healthcare, medical racism, etc.), so we also have direct links from race/income to BP meds, which means that race/income influence treatment not just through their impact on BMI, but also through those selection mechanisms. It's also assuming that BMI impacts treatment/mortality through its affect on cholesterol/BP which may not be fair; BMI could ostensibly impact selection into treatment if doctors treat patients with higher BMIs differently not just because of those patients' higher cholesterol/BP levels, but also due to fatphobia (e.g. suggesting diet/exercise change before medication), but I'm ignoring that for now...
 ## TMLE Estimation
 
 Use the `tmle` package to estimate a model for the effect of blood pressure medication on the probability of mortality. Do the following:
@@ -355,40 +406,24 @@ heart_tmle <- heart_tmle %>%
 Y <- heart_tmle$mortality                     # Outcome 
 A <- heart_tmle$blood_pressure_medication     # Treatment 
 
-# Define W based on your DAG's causal structure
+# Define W based on DAG
 W <- heart_tmle %>%
   select(
-    # All confounders from your DAG
+    # All confounders from DAG
     age, sex_at_birth, simplified_race, income_thousands, college_educ,
     bmi, blood_pressure, chol
   ) %>%
   as.data.frame()
 
-# Based on your DAG:
-# 1. Outcome model: mortality ~ blood_pressure_medication
-# 2. Propensity model: blood_pressure_medication ~ blood_pressure + chol + bmi + age + sex_at_birth + 
-#                                                   simplified_race + income_thousands + college_educ
 
-# Create formulas explicitly based on your DAG
-# Outcome model (Q) formula
-Q_formula <- "Y ~ A"  # Simple outcome model from your DAG
-
-# Propensity score (g) formula
-g_formula <- paste0("A ~ blood_pressure + chol + bmi + age + sex_at_birth + ",
-                   "simplified_race + income_thousands + college_educ")
-
-# Run TMLE with explicit formulas based on DAG
+# Run TMLE 
 set.seed(123)
-tmle_dag_result <- tmle(
+tmle_dag_result <- tmle::tmle(
   Y = Y,                      # Outcome: mortality
   A = A,                      # Treatment: blood pressure medication
   W = W,                      # Covariates
   Q.SL.library = sl_libs,     # SuperLearner library for outcome model
   g.SL.library = sl_libs,     # SuperLearner library for propensity score model
-  family = "binomial",        # For binary outcome (mortality)
-  g1W = NULL,                 # Let the propensity be estimated by SuperLearner
-  Qform = Q_formula,          # Specify outcome model based on DAG
-  gform = g_formula,          # Specify propensity model based on DAG
   verbose = TRUE              # Show progress
 )
 
@@ -425,6 +460,11 @@ print(results_table)
 
 Now imagine that everything you measured up until now was in "time period 1". Some people either choose not to or otherwise lack access to medication in that time period, but do start taking the medication in time period 2. Imagine we measure covariates like BMI, blood pressure, and cholesterol at that time for everyone in the study (indicated by a "_2" after the covariate name). 
 
+```{r}
+colnames(heart_disease)
+```
+
+
 ## Causal Diagram
 
 Update your causal diagram to incorporate this new information. \textbf{Note}: If your groups divides up sections and someone is working on LTMLE separately from TMLE then just draw a causal diagram even if it does not match the one you specified above.
@@ -433,14 +473,262 @@ Update your causal diagram to incorporate this new information. \textbf{Note}: I
 
 \textbf{Hint}: Keep in mind that any of the variables that end in "\_2" are likely affected by both the previous covariates and the first treatment when drawing your DAG.
 
+```{r}
+#LTME DAG
+# Define node positions for a clearer longitudinal DAG
+nodes <- data.frame(
+  name = c(
+    # Time 1 variables
+    "race", "income", "age_SAB", "bmi_1", "chol_BP_1", "blood_pressure_medication_1", 
+    # Time 2 variables
+    "bmi_2", "chol_BP_2", "blood_pressure_medication_2", 
+    # Outcome
+    "mortality"
+  ),
+  label = c(
+    # Time 1 labels
+    "Race", "Income", "Age/SAB", "BMI (t=1)", "BP/Chol (t=1)", "BP Meds (t=1)", 
+    # Time 2 labels
+    "BMI (t=2)", "BP/Chol (t=2)", "BP Meds (t=2)",
+    # Outcome label
+    "Mortality"
+  ),
+  # Improved coordinates for better spacing and organization
+  x = c(
+    # Time 1 - better spread out
+    1, 3, 5, 2, 4, 3,
+    # Time 2 - aligned with time 1 counterparts
+    2, 4, 3,
+    # Outcome - centered
+    3
+  ),
+  y = c(
+    # Time 1 - higher positions
+    10, 10, 10, 8, 8, 6,
+    # Time 2 - middle positions
+    4, 4, 2,
+    # Outcome - bottom
+    0
+  ),
+  time = c(
+    # Time period for each variable
+    1, 1, 1, 1, 1, 1,  # Time 1 variables
+    2, 2, 2,           # Time 2 variables
+    3                  # Outcome
+  ),
+  type = c(
+    # Variable types
+    "baseline", "baseline", "baseline", "covariate", "covariate", "treatment",
+    "covariate", "covariate", "treatment",
+    "outcome"
+  )
+)
+
+# Define edges to show time-dependent confounding
+edges <- data.frame(
+  from = c(
+    # Time 1 relationships - baseline to covariates
+    "race", "income", "age_SAB", 
+    "race", "income",
+    "bmi_1", "chol_BP_1", "age_SAB",
+    
+    # Time 1 to Time 2 relationships
+    "bmi_1", "chol_BP_1", 
+    "blood_pressure_medication_1", "blood_pressure_medication_1",
+    
+    # Time 2 relationships
+    "bmi_2", "chol_BP_2", "age_SAB",
+    
+    # Effects on outcome
+    "blood_pressure_medication_1", "blood_pressure_medication_2"
+  ),
+  to = c(
+    # Time 1 relationships
+    "bmi_1", "bmi_1", "bmi_1",
+    "chol_BP_1", "chol_BP_1",
+    "blood_pressure_medication_1", "blood_pressure_medication_1", "blood_pressure_medication_1",
+    
+    # Time 1 to Time 2 relationships
+    "bmi_2", "chol_BP_2", 
+    "bmi_2", "chol_BP_2",
+    
+    # Time 2 relationships
+    "blood_pressure_medication_2", "blood_pressure_medication_2", "blood_pressure_medication_2",
+    
+    # Effects on outcome
+    "mortality", "mortality"
+  ),
+  # Identify important paths
+  path_type = c(
+    # Regular paths
+    "regular", "regular", "regular", 
+    "regular", "regular",
+    "regular", "regular", "regular",
+    
+    # Regular temporal paths
+    "regular", "regular",
+    
+    # Time-dependent confounding paths (treatment 1 → covariate 2)
+    "confounding", "confounding",
+    
+    # Time 2 relationships
+    "confounding", "confounding", "regular",
+    
+    # Effects on outcome
+    "effect", "effect"
+  )
+)
+
+# Create edge coordinates
+edge_coords <- data.frame()
+for(i in 1:nrow(edges)) {
+  from_node <- nodes[nodes$name == edges$from[i], ]
+  to_node <- nodes[nodes$name == edges$to[i], ]
+  
+  edge_coords <- rbind(edge_coords, data.frame(
+    x = from_node$x, 
+    y = from_node$y, 
+    xend = to_node$x, 
+    yend = to_node$y,
+    path_type = edges$path_type[i]
+  ))
+}
+
+# Create the plot with clearer organization
+ggplot() +
+  # Add background rectangles for time periods
+  annotate("rect", xmin = 0, xmax = 6, ymin = 5.5, ymax = 11, 
+           fill = "gray95", alpha = 0.3) +
+  annotate("rect", xmin = 0, xmax = 6, ymin = 1.5, ymax = 5.5, 
+           fill = "gray90", alpha = 0.3) +
+  annotate("rect", xmin = 0, xmax = 6, ymin = -0.5, ymax = 1.5, 
+           fill = "gray85", alpha = 0.3) +
+  
+  # Add edges with arrows and color coding
+  geom_segment(data = edge_coords, 
+               aes(x = x, y = y, xend = xend, yend = yend, color = path_type),
+               arrow = arrow(length = unit(0.3, "cm"), type = "closed"),
+               size = 0.9) +
+  
+  # Add nodes with different colors for types
+  geom_point(data = nodes, 
+             aes(x = x, y = y, fill = type), 
+             size = 18, shape = 21, color = "black") +
+  
+  # Add text labels
+  geom_text(data = nodes,
+            aes(x = x, y = y, label = label),
+            color = "white", size = 3.2) +
+  
+  # Time period labels
+  annotate("text", x = 0.5, y = 10.5, label = "Time 1 (Baseline)", 
+           fontface = "bold", hjust = 0, size = 4) +
+  annotate("text", x = 0.5, y = 5, label = "Time 2", 
+           fontface = "bold", hjust = 0, size = 4) +
+  annotate("text", x = 0.5, y = 0.5, label = "Outcome", 
+           fontface = "bold", hjust = 0, size = 4) +
+  
+  # Label for time-dependent confounding
+  annotate("text", x = 5, y = 3, 
+           label = "Time-dependent\nconfounding", 
+           color = "darkred", fontface = "bold", size = 3.5) +
+  
+  # Arrow pointing to the confounding
+  annotate("segment", x = 5, y = 3.3, xend = 4.3, yend = 3.8,
+           arrow = arrow(length = unit(0.2, "cm"), type = "closed"),
+           color = "darkred") +
+  
+  # Styling
+  scale_fill_manual(values = c(
+    "baseline" = "#343a40",   # Dark gray for baseline
+    "covariate" = "#6c757d",  # Gray for covariates
+    "treatment" = "#d9534f",  # Red for treatments
+    "outcome" = "#5bc0de"     # Blue for outcome
+  )) +
+  
+  scale_color_manual(values = c(
+    "regular" = "gray30",     # Regular paths
+    "confounding" = "darkred", # Time-dependent confounding paths
+    "effect" = "#d9534f"      # Effect paths
+  )) +
+  
+  # Remove axes and grid
+  theme_void() +
+  
+  # Remove legend and add margins
+  theme(legend.position = "none",
+        plot.margin = margin(20, 20, 20, 20, "pt"),
+        plot.title = element_text(size = 14, face = "bold"),
+        plot.subtitle = element_text(size = 12)) +
+  
+  # Set plot dimensions
+  coord_fixed(ratio = 1, xlim = c(0, 6), ylim = c(-0.5, 11)) +
+  
+  # Add title
+  labs(title = "Longitudinal Causal DAG for Blood Pressure Medication Study",
+       subtitle = "Showing time-dependent confounding across two time periods")
+```
+
+
+
 ## LTMLE Estimation
 
 Use the `ltmle` package for this section. First fit a "naive model" that \textbf{does not} control for the time-dependent confounding. Then run a LTMLE model that does control for any time dependent confounding. Follow the same steps as in the TMLE section. Do you see a difference between the two estimates?
 
 ```{r}
-## Naive Model (no time-dependent confounding) estimate
+# Define SuperLearner library
+sl_libs <- c('SL.mean', 'SL.glm', 'SL.earth', 'SL.ranger', 'SL.step')
 
+# Prepare data
+
+heart_ltmle <- heart_disease %>%
+  mutate(
+    sex_at_birth = as.factor(sex_at_birth),
+    simplified_race = as.factor(simplified_race),
+    college_educ = as.factor(college_educ)
+  )
+## Naive Model (no time-dependent confounding) estimate
+# Pretend time periods are separate
+naive_model <- ltmle(
+  data = heart_ltmle,
+  Anodes = c("blood_pressure_medication"),                     # First treatment
+  Cnodes = NULL,                                              # No censoring
+  Lnodes = c("bmi_2", "blood_pressure_2", "chol_2"),          # Assign time 2 variables as L nodes
+  Ynodes = "mortality",                                       # Outcome
+  Qform = c(
+    "mortality ~ blood_pressure_medication + age + sex_at_birth + simplified_race + college_educ + income_thousands + bmi + blood_pressure + chol"
+  ),                                                         # Explicitly specify outcome model
+  gform = c(
+    "blood_pressure_medication ~ age + sex_at_birth + simplified_race + college_educ + income_thousands + bmi + blood_pressure + chol"
+  ),                                                         # Explicitly specify treatment model
+  abar = 1,                                                  # Treatment = 1
+  SL.library = sl_libs
+)
+# Display naive model results
+summary(naive_model)
 ## LTMLE estimate
+ltmle_model <- ltmle(
+  data = heart_ltmle,
+  Anodes = c("blood_pressure_medication", "blood_pressure_medication_2"), # Both treatments
+  Lnodes = c("bmi_2", "blood_pressure_2", "chol_2"),                     # Time-dependent confounders
+  Ynodes = "mortality",
+  abar = c(1, 1),                                                        # Treatment at both times
+  SL.library = sl_libs
+)
+
+# Display proper model results
+summary(ltmle_model)
+
+# Compare results
+results_comparison <- data.frame(
+  Model = c("Naive Model", "LTMLE Model"),
+  ATE = c(coef(naive_model), coef(ltmle_model)),
+  Lower_CI = c(confint(naive_model)[1], confint(ltmle_model)[1]),
+  Upper_CI = c(confint(naive_model)[2], confint(ltmle_model)[2]),
+  P_value = c(summary(naive_model)$pvalue, summary(ltmle_model)$pvalue)
+)
+
+print(results_comparison)
 ```
 
 ## Discussion Questions
