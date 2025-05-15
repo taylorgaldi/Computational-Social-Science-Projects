@@ -149,6 +149,7 @@ sl = SuperLearner(Y = y_train,
                   # notice these models are concatenated
                   SL.library =sl_libs)
 sl
+sl$cvRisk[which.min(sl$cvRisk)]
 # predictions
 # ----------
 preds <- 
@@ -222,7 +223,6 @@ Using ggdag and daggity, draw a directed acylcic graph (DAG) that describes the 
 heart_dag <- 
   heart_disease %>%
   select(-ends_with("_2"))
-colnames(heart_dag)
 ```
 I found this quite hard not because I thought some things were unrelated like the instructions suggested, but because everything feels related, but it feels hard to untangle the question of direct effects on outcome versus indirect effects. It's also a bit confusing for me because from the PDF I wasn't clear if the blood_pressure_medication tretament (0,1) indicates that the person was offered a medication and potentially didn't take it, or if they might not have been offered it at all. For the former, then there's maybe differences in personal attributes that makes someone more reticent to take medication (race? age? college education?), but for the latter, maybe it's differences in personal attributes that makes a physician less likely to prescribe a patient medication, perhaps due to discrimination (race? sex at birth? income? bmi?). Because if a physician was just going off of tangible, bio/social metrics of the likelihood of heart disease (based on a person's bmi, race, age, cholesterol, sex at birth, and measured blood pressure) when they choose to prescribe someone medication or instead tell them to do exercise more or something like that, then that's a more straightforward story. But if the physician is introducing bias, for example by telling someone with a low bmi but high blood pressure and cholesterol to just exercise more instead of prescribing them medication for something genetic, with assumption that because they're 'healthy looking' medication is not necessary, that's a different story. I guess maybe it doesn't matter since they're both mediators, they just have slightly different nodes? I'm also not a doctor so I don't really know the relationship between blood pressure and cholesterol, do people naturally have high cholesterol without high blood pressure or vice versa? 
 Okay looking back at the instructions, I guess this line of thought actually makes sense because TMLE has the outcome and propensity score models. So there's outcome ~ treatment/predictors and then treatment ~ predictors.
@@ -286,6 +286,7 @@ simple_dag <- ggdag::dagify(
   # Core relationships
   mortality ~ blood_pressure_medication,
   blood_pressure_medication ~ chol_BP + age_SAB,  #assuming that the only way BMI is impacting clinical risk is through its effect on cholesterol/BP. I personally think that's a fair assumption, but maybe there's stronger evidence that BMI is related to genetics. In other words, saying that cholesterol and BP both have independent effects on clinical risk (e.g. genetics) that are unrelated to BMI. 
+  #combining age and SAB because race and income have no relationship to them, but race and income do have a relationship to cholesterol and blood pressure. Probably a better way to do this...
   
   # Simplified mediators of selection into treatment
   #Sociodemographic impact on health measures
@@ -325,21 +326,93 @@ Use the `tmle` package to estimate a model for the effect of blood pressure medi
     \item Report the average treatment effect and any other relevant statistics
 \end{enumerate}
 
+
+
+NOTE: Change variable names from dag to TMLE
+
 ```{r}
 # set seed for reproducibility
 set.seed(1000)
 
-# implement above all in one step using tmle
+# implement using tmle
 # ----------
-tmle_fit <-
-  tmle::tmle(Y = Y,                  # outcome
-             A = A,                  # treatment
-             W = W,                  # baseline covariates
-             Q.SL.library = sl_libs, # libraries for initial estimate 
-             g.SL.library = sl_libs) # libraries for prob to be in treatment
+sl_libs <- c('SL.mean', 'SL.glm', 'SL.earth', 'SL.ranger', 'SL.step')
 
-# view results 
-tmle_fit
+# Prepare data for TMLE
+# Remove variables with suffix "_2" (follow-up measurements)
+heart_tmle <- heart_disease %>%
+  select(-ends_with("_2"))
+
+# Convert categorical variables to factors
+heart_tmle <- heart_tmle %>%
+  mutate(
+    sex_at_birth = as.factor(sex_at_birth),
+    simplified_race = as.factor(simplified_race),
+    college_educ = as.factor(college_educ)
+  )
+
+# Define outcome and treatment
+Y <- heart_tmle$mortality                     # Outcome 
+A <- heart_tmle$blood_pressure_medication     # Treatment 
+
+# Define W based on your DAG's causal structure
+W <- heart_tmle %>%
+  select(
+    # All confounders from your DAG
+    age, sex_at_birth, simplified_race, income_thousands, college_educ,
+    bmi, blood_pressure, chol
+  ) %>%
+  as.data.frame()
+
+# Based on your DAG:
+# 1. Outcome model: mortality ~ blood_pressure_medication
+# 2. Propensity model: blood_pressure_medication ~ blood_pressure + chol + bmi + age + sex_at_birth + 
+#                                                   simplified_race + income_thousands + college_educ
+
+# Create formulas explicitly based on your DAG
+# Outcome model (Q) formula
+Q_formula <- "Y ~ A"  # Simple outcome model from your DAG
+
+# Propensity score (g) formula
+g_formula <- paste0("A ~ blood_pressure + chol + bmi + age + sex_at_birth + ",
+                   "simplified_race + income_thousands + college_educ")
+
+# Run TMLE with explicit formulas based on DAG
+set.seed(123)
+tmle_dag_result <- tmle(
+  Y = Y,                      # Outcome: mortality
+  A = A,                      # Treatment: blood pressure medication
+  W = W,                      # Covariates
+  Q.SL.library = sl_libs,     # SuperLearner library for outcome model
+  g.SL.library = sl_libs,     # SuperLearner library for propensity score model
+  family = "binomial",        # For binary outcome (mortality)
+  g1W = NULL,                 # Let the propensity be estimated by SuperLearner
+  Qform = Q_formula,          # Specify outcome model based on DAG
+  gform = g_formula,          # Specify propensity model based on DAG
+  verbose = TRUE              # Show progress
+)
+
+# Display results
+summary(tmle_dag_result)
+
+# Extract key statistics
+dag_ate <- tmle_dag_result$estimates$ATE
+dag_ate_ci <- c(dag_ate$CI[1], dag_ate$CI[2])
+dag_pvalue <- 2 * (1 - pnorm(abs(dag_ate$pvalue)))
+
+# Create a results table
+results_table <- data.frame(
+  Measure = c("Average Treatment Effect (ATE)", 
+              "95% Confidence Interval Lower", 
+              "95% Confidence Interval Upper",
+              "P-value"),
+  Value = c(round(dag_ate$psi, 4), 
+            round(dag_ate_ci[1], 4), 
+            round(dag_ate_ci[2], 4),
+            round(dag_pvalue, 4))
+)
+
+print(results_table)
 ```
 
 ## Discussion Questions
@@ -359,11 +432,6 @@ Update your causal diagram to incorporate this new information. \textbf{Note}: I
 \textbf{Hint}: Check out slide 27 from Maya's lecture, or slides 15-17 from Dave's second slide deck in week 8 on matching.
 
 \textbf{Hint}: Keep in mind that any of the variables that end in "\_2" are likely affected by both the previous covariates and the first treatment when drawing your DAG.
-
-```{r}
-# DAG for TMLE
-
-```
 
 ## LTMLE Estimation
 
