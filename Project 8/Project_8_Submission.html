@@ -1233,26 +1233,175 @@ full_results &lt;- extract_results(ltmle_full, &quot;Full LTMLE&quot;)
 # Combine into comparison table
 results_comparison &lt;- rbind(naive_results, full_results)
 
-# Print results
-print(results_comparison)</code></pre>
+# Print basic results table
+cat(&quot;\n--- Basic LTMLE Results ---\n&quot;)</code></pre>
+<pre><code>## 
+## --- Basic LTMLE Results ---</code></pre>
+<pre class="r"><code>print(results_comparison)</code></pre>
 <pre><code>##         Model     ATE CI_Lower CI_Upper P_value
 ## 1 Naive LTMLE -0.3048  -0.4555  -0.1541  0.0001
 ## 2  Full LTMLE -0.3374  -0.5445  -0.1304  0.0014</code></pre>
-<pre class="r"><code># If both models ran successfully, test for difference between them
-if (!is.na(naive_results$ATE) &amp;&amp; !is.na(full_results$ATE)) {
-  cat(&quot;\nDifference between models (Full - Naive):&quot;, 
-      round(full_results$ATE - naive_results$ATE, 4))
+<pre class="r"><code># If both models ran successfully, print additional statistics
+if (!is.null(ltmle_naive) &amp;&amp; !is.null(ltmle_full)) {
+  # Safely print statistics and handle missing values
+  tryCatch({
+    # Get full summaries
+    naive_summary &lt;- summary(ltmle_naive)
+    full_summary &lt;- summary(ltmle_full)
+    
+    # Print detailed statistics for Naive LTMLE
+    cat(&quot;\n--- Naive LTMLE Statistics ---\n&quot;)
+    
+    # Print ATE info
+    cat(&quot;ATE (TMLE): &quot;, round(naive_summary$effect.measures$ATE$estimate, 4), 
+        &quot; (95% CI: &quot;, round(naive_summary$effect.measures$ATE$CI[1], 4), 
+        &quot; to &quot;, round(naive_summary$effect.measures$ATE$CI[2], 4), &quot;)\n&quot;, sep=&quot;&quot;)
+    
+    # Only continue with other stats if they exist
+    if (!is.null(naive_summary$effect.measures$ATE$estimate.IPTW)) {
+      cat(&quot;ATE (IPTW): &quot;, round(naive_summary$effect.measures$ATE$estimate.IPTW, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(naive_summary$effect.measures$treatment$estimate)) {
+      cat(&quot;Treatment Mean (EY1): &quot;, round(naive_summary$effect.measures$treatment$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(naive_summary$effect.measures$control$estimate)) {
+      cat(&quot;Control Mean (EY0): &quot;, round(naive_summary$effect.measures$control$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(naive_summary$effect.measures$RR$estimate)) {
+      cat(&quot;Relative Risk: &quot;, round(naive_summary$effect.measures$RR$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(naive_summary$effect.measures$OR$estimate)) {
+      cat(&quot;Odds Ratio: &quot;, round(naive_summary$effect.measures$OR$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(naive_summary$effect.measures$ATE$pvalue)) {
+      cat(&quot;P-value: &quot;, round(naive_summary$effect.measures$ATE$pvalue, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    # Print detailed statistics for Full LTMLE
+    cat(&quot;\n--- Full LTMLE Statistics ---\n&quot;)
+    
+    # Print ATE info
+    cat(&quot;ATE (TMLE): &quot;, round(full_summary$effect.measures$ATE$estimate, 4), 
+        &quot; (95% CI: &quot;, round(full_summary$effect.measures$ATE$CI[1], 4), 
+        &quot; to &quot;, round(full_summary$effect.measures$ATE$CI[2], 4), &quot;)\n&quot;, sep=&quot;&quot;)
+    
+    # Only continue with other stats if they exist
+    if (!is.null(full_summary$effect.measures$ATE$estimate.IPTW)) {
+      cat(&quot;ATE (IPTW): &quot;, round(full_summary$effect.measures$ATE$estimate.IPTW, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$treatment$estimate)) {
+      cat(&quot;Treatment Mean (EY1): &quot;, round(full_summary$effect.measures$treatment$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$control$estimate)) {
+      cat(&quot;Control Mean (EY0): &quot;, round(full_summary$effect.measures$control$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$RR$estimate)) {
+      cat(&quot;Relative Risk: &quot;, round(full_summary$effect.measures$RR$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$OR$estimate)) {
+      cat(&quot;Odds Ratio: &quot;, round(full_summary$effect.measures$OR$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$ATE$pvalue)) {
+      cat(&quot;P-value: &quot;, round(full_summary$effect.measures$ATE$pvalue, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    # Print difference between models
+    cat(&quot;\n--- Difference between models (Full - Naive) ---\n&quot;)
+    
+    # Only calculate differences for stats that exist in both models
+    if (!is.null(full_summary$effect.measures$ATE$estimate) &amp;&amp; 
+        !is.null(naive_summary$effect.measures$ATE$estimate)) {
+      cat(&quot;ATE difference: &quot;, 
+          round(full_summary$effect.measures$ATE$estimate - 
+                 naive_summary$effect.measures$ATE$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$ATE$estimate.IPTW) &amp;&amp; 
+        !is.null(naive_summary$effect.measures$ATE$estimate.IPTW)) {
+      cat(&quot;IPTW difference: &quot;, 
+          round(full_summary$effect.measures$ATE$estimate.IPTW - 
+                 naive_summary$effect.measures$ATE$estimate.IPTW, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$treatment$estimate) &amp;&amp; 
+        !is.null(naive_summary$effect.measures$treatment$estimate)) {
+      cat(&quot;Treatment Mean difference: &quot;, 
+          round(full_summary$effect.measures$treatment$estimate - 
+                 naive_summary$effect.measures$treatment$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$control$estimate) &amp;&amp; 
+        !is.null(naive_summary$effect.measures$control$estimate)) {
+      cat(&quot;Control Mean difference: &quot;, 
+          round(full_summary$effect.measures$control$estimate - 
+                 naive_summary$effect.measures$control$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$RR$estimate) &amp;&amp; 
+        !is.null(naive_summary$effect.measures$RR$estimate)) {
+      cat(&quot;Relative Risk difference: &quot;, 
+          round(full_summary$effect.measures$RR$estimate - 
+                 naive_summary$effect.measures$RR$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+    
+    if (!is.null(full_summary$effect.measures$OR$estimate) &amp;&amp; 
+        !is.null(naive_summary$effect.measures$OR$estimate)) {
+      cat(&quot;Odds Ratio difference: &quot;, 
+          round(full_summary$effect.measures$OR$estimate - 
+                 naive_summary$effect.measures$OR$estimate, 4), &quot;\n&quot;, sep=&quot;&quot;)
+    }
+  }, error = function(e) {
+    cat(&quot;\nError calculating detailed statistics:&quot;, e$message, &quot;\n&quot;)
+    cat(&quot;Basic results are still available above.\n&quot;)
+  })
 }</code></pre>
 <pre><code>## 
-## Difference between models (Full - Naive): -0.0326</code></pre>
+## --- Naive LTMLE Statistics ---
+## ATE (TMLE): -0.3048 (95% CI: -0.4555 to -0.1541)
+## Treatment Mean (EY1): 0.2615
+## Control Mean (EY0): 0.5663
+## Relative Risk: 0.4617
+## Odds Ratio: 0.2712
+## P-value: 1e-04
+## 
+## --- Full LTMLE Statistics ---
+## ATE (TMLE): -0.3374 (95% CI: -0.5445 to -0.1304)
+## Treatment Mean (EY1): 0.2303
+## Control Mean (EY0): 0.5677
+## Relative Risk: 0.4056
+## Odds Ratio: 0.2278
+## P-value: 0.0014
+## 
+## --- Difference between models (Full - Naive) ---
+## ATE difference: -0.0326
+## Treatment Mean difference: -0.0312
+## Control Mean difference: 0.0014
+## Relative Risk difference: -0.0561
+## Odds Ratio difference: -0.0434</code></pre>
 <p>Oh my GOD you have no idea how happy I am that this just ran in
 general…this absolutely killed me. For some reason R kept interrupting
 my environment and so I would have to start the whole notebook again.
 Cool, so the ATE for the full LMTLE is only slightly more negative than
 the naive, which is surprsing considering that the naive doesn’t control
 for time-confounding, and we have no reason to believe that the
-time-confounding variables don’t influence treatment/outcome…. ##
-Discussion Questions</p>
+time-confounding variables don’t influence treatment/outcome…. I think
+an interesting statistic is that, like with the super learner, the
+control effect is showing that the mortality rate is high for those in
+the control group. I wonder if this is all related to the poor
+performance with the confusion matrix, because if the baseline
+covariates are somehow the strongest predictors of treatment mortality
+(i.e. not the time-confounding ones), then it makes sense that
+prediction is harder. ## Discussion Questions</p>
 </div>
 </div>
 
