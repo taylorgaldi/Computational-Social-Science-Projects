@@ -659,7 +659,7 @@ ggplot() +
 
 Use the `ltmle` package for this section. First fit a "naive model" that \textbf{does not} control for the time-dependent confounding. Then run a LTMLE model that does control for any time dependent confounding. Follow the same steps as in the TMLE section. Do you see a difference between the two estimates?
 
-```{r ltmle-chunk, cache=FALSE}
+```{r}
 #I had to get crazy with these failsafes because I kept knitting and it would take like 3 hours to get to 90% and then crash 
 # Load necessary libraries
 library(dplyr)
@@ -736,15 +736,15 @@ ltmle_full <- tryCatch({
     data = full_data,
     Anodes = c("blood_pressure_medication", "blood_pressure_medication_2"),
     Lnodes = c("bmi", "blood_pressure", "chol", 
-              "bmi_2", "blood_pressure_2", "chol_2"),
+               "bmi_2", "blood_pressure_2", "chol_2"),
     Ynodes = "mortality",
     abar = list(treatment = c(1, 1), control = c(0, 0)),
     SL.library = sl_libs,
-    gbounds = c(0.05, 0.95),  # Less aggressive bounds
-    family = binomial()
+    gbounds = c(0.05, 0.95)
   )
 }, error = function(e) {
-  warning(paste("Full LTMLE failed:", e$message))
+  cat("Full LTMLE failed:\n")
+  print(e)
   return(NULL)
 })
 
@@ -810,7 +810,7 @@ if (!is.na(naive_results$ATE) && !is.na(full_results$ATE)) {
 
 ```
 
-
+Oh my GOD you have no idea how happy I am that this just ran in general...this absolutely killed me. For some reason R kept interrupting my environment and so I would have to start the whole notebook again. Cool, so the ATE for the full LMTLE is only slightly more negative than the naive, which is surprsing considering that the naive doesn't control for time-confounding, and we have no reason to believe that the time-confounding variables don't influence treatment/outcome.... 
 ## Discussion Questions
 
 \begin{enumerate}

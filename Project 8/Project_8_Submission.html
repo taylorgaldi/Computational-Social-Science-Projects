@@ -1170,15 +1170,15 @@ ltmle_full &lt;- tryCatch({
     data = full_data,
     Anodes = c(&quot;blood_pressure_medication&quot;, &quot;blood_pressure_medication_2&quot;),
     Lnodes = c(&quot;bmi&quot;, &quot;blood_pressure&quot;, &quot;chol&quot;, 
-              &quot;bmi_2&quot;, &quot;blood_pressure_2&quot;, &quot;chol_2&quot;),
+               &quot;bmi_2&quot;, &quot;blood_pressure_2&quot;, &quot;chol_2&quot;),
     Ynodes = &quot;mortality&quot;,
     abar = list(treatment = c(1, 1), control = c(0, 0)),
     SL.library = sl_libs,
-    gbounds = c(0.05, 0.95),  # Less aggressive bounds
-    family = binomial()
+    gbounds = c(0.05, 0.95)
   )
 }, error = function(e) {
-  warning(paste(&quot;Full LTMLE failed:&quot;, e$message))
+  cat(&quot;Full LTMLE failed:\n&quot;)
+  print(e)
   return(NULL)
 })
 
@@ -1236,17 +1236,23 @@ results_comparison &lt;- rbind(naive_results, full_results)
 # Print results
 print(results_comparison)</code></pre>
 <pre><code>##         Model     ATE CI_Lower CI_Upper P_value
-## 1 Naive LTMLE -0.3048  -0.4555  -0.1541   1e-04
-## 2  Full LTMLE      NA       NA       NA      NA</code></pre>
+## 1 Naive LTMLE -0.3048  -0.4555  -0.1541  0.0001
+## 2  Full LTMLE -0.3374  -0.5445  -0.1304  0.0014</code></pre>
 <pre class="r"><code># If both models ran successfully, test for difference between them
 if (!is.na(naive_results$ATE) &amp;&amp; !is.na(full_results$ATE)) {
   cat(&quot;\nDifference between models (Full - Naive):&quot;, 
       round(full_results$ATE - naive_results$ATE, 4))
 }</code></pre>
-</div>
-<div id="discussion-questions" class="section level2">
-<h2>Discussion Questions</h2>
-
+<pre><code>## 
+## Difference between models (Full - Naive): -0.0326</code></pre>
+<p>Oh my GOD you have no idea how happy I am that this just ran in
+general…this absolutely killed me. For some reason R kept interrupting
+my environment and so I would have to start the whole notebook again.
+Cool, so the ATE for the full LMTLE is only slightly more negative than
+the naive, which is surprsing considering that the naive doesn’t control
+for time-confounding, and we have no reason to believe that the
+time-confounding variables don’t influence treatment/outcome…. ##
+Discussion Questions</p>
 </div>
 </div>
 
