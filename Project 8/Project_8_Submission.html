@@ -353,53 +353,6 @@ display: none;
 </div>
 
 
-<pre class="r"><code>knitr::opts_chunk$set(
-  warning = FALSE,  # suppress warnings in output
-  message = FALSE,  # (optional) suppress messages too
-  echo = TRUE       # still show your code
-)
-
-# Add to this package list for additional SL algorithms
-if (!require(&quot;pacman&quot;)) install.packages(&quot;pacman&quot;)</code></pre>
-<pre><code>## Loading required package: pacman</code></pre>
-<pre class="r"><code>pacman::p_load(
-  tidyverse,
-  ggthemes,
-  ltmle,
-  tmle,
-  SuperLearner,
-  tidymodels,
-  caret,
-  dagitty,
-  ggdag,
-  here)
-# Set a CRAN mirror
-options(repos = c(CRAN = &quot;https://cloud.r-project.org&quot;))
-#install.packages(c(&quot;future&quot;, &quot;furrr&quot;))
-library(here)
-library(tidyverse)
-here()</code></pre>
-<pre><code>## [1] &quot;/Users/taylorgaldi/git/Computational-Social-Science-Projects/Project 8&quot;</code></pre>
-<pre class="r"><code>#REMINDER: Change here on desktop
-heart_disease &lt;- readr::read_csv(here(&quot;heart_disease_tmle.csv&quot;))</code></pre>
-<pre><code>## Rows: 10000 Columns: 14</code></pre>
-<pre><code>## ── Column specification ────────────────────────────────────────────────────────
-## Delimiter: &quot;,&quot;
-## dbl (14): age, sex_at_birth, simplified_race, college_educ, income_thousands...
-## 
-## ℹ Use `spec()` to retrieve the full column specification for this data.
-## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
-<pre class="r"><code>colnames(heart_disease)</code></pre>
-<pre><code>##  [1] &quot;age&quot;                         &quot;sex_at_birth&quot;               
-##  [3] &quot;simplified_race&quot;             &quot;college_educ&quot;               
-##  [5] &quot;income_thousands&quot;            &quot;bmi&quot;                        
-##  [7] &quot;blood_pressure&quot;              &quot;chol&quot;                       
-##  [9] &quot;blood_pressure_medication&quot;   &quot;bmi_2&quot;                      
-## [11] &quot;blood_pressure_2&quot;            &quot;chol_2&quot;                     
-## [13] &quot;blood_pressure_medication_2&quot; &quot;mortality&quot;</code></pre>
-<pre class="r"><code># set seed
-# ----------
-set.seed(44)</code></pre>
 <div id="introduction" class="section level1">
 <h1>Introduction</h1>
 <p>Heart disease is the leading cause of death in the United States, and
@@ -1147,63 +1100,21 @@ library(dplyr)
 library(ltmle)
 library(SuperLearner)
 
-# Define SuperLearner library
-#I&#39;m taking out ranger because it was causing too many issues :(
-sl_libs &lt;- c(&#39;SL.mean&#39;, &#39;SL.glm&#39;, &#39;SL.earth&#39;, &#39;SL.step&#39;)
+# Set seed for reproducibility
+set.seed(123)
 
-# Safe wrapper to run LTMLE without breaking the knit
-safe_ltmle &lt;- function(...) {
-  tryCatch({
-    ltmle(...)
-  }, error = function(e) {
-    warning(paste(&quot;LTMLE failed:&quot;, e$message))
-    return(NULL)
-  })
-}
-
-# Safe extraction of ATE from a fitted ltmle object
-safe_extract_ate &lt;- function(fit, model_name = &quot;Unknown&quot;) {
-  if (is.null(fit)) {
-    warning(paste(&quot;ATE extraction skipped for&quot;, model_name, &quot;- model is NULL.&quot;))
-    return(data.frame(
-      Model = model_name,
-      ATE = NA,
-      CI_Lower = NA,
-      CI_Upper = NA,
-      P_value = NA
-    ))
-  }
-
-  tryCatch({
-    est &lt;- summary(fit)$effect.measures$ATE
-    data.frame(
-      Model = model_name,
-      ATE = round(est$estimate, 4),
-      CI_Lower = round(est$CI[1], 4),
-      CI_Upper = round(est$CI[2], 4),
-      P_value = round(est$pvalue, 4)
-    )
-  }, error = function(e) {
-    warning(paste(&quot;ATE extraction failed for&quot;, model_name, &quot;:&quot;, e$message))
-    data.frame(
-      Model = model_name,
-      ATE = NA,
-      CI_Lower = NA,
-      CI_Upper = NA,
-      P_value = NA
-    )
-  })
-}
+# Define SuperLearner library - using simpler algorithms that won&#39;t cause failures I had to reduce them from 5 and change them around, sorry Kasey : ( it just kept breaking over and over
+sl_libs &lt;- c(&#39;SL.mean&#39;, &#39;SL.glm&#39;, &#39;SL.step&#39;)
 
 # Prepare naive data (no Lnodes)
 naive_data &lt;- heart_disease %&gt;%
   select(
     age, sex_at_birth, simplified_race, college_educ, income_thousands,  # Baseline covariates (W)
-    blood_pressure_medication,                                            # A1
-    blood_pressure_medication_2,                                          # A2
-    mortality                                                             # Outcome Y
+    blood_pressure_medication,                                           # A1
+    blood_pressure_medication_2,                                         # A2
+    mortality                                                            # Outcome Y
   ) %&gt;%
-    mutate(
+  mutate(
     sex_at_birth = as.factor(sex_at_birth),
     simplified_race = as.factor(simplified_race),
     college_educ = as.factor(college_educ),
@@ -1212,14 +1123,20 @@ naive_data &lt;- heart_disease %&gt;%
     mortality = as.numeric(mortality)
   )
 
-# Fit naive LTMLE
-ltmle_naive &lt;- safe_ltmle(
-  data = naive_data,
-  Anodes = c(&quot;blood_pressure_medication&quot;, &quot;blood_pressure_medication_2&quot;),
-  Ynodes = &quot;mortality&quot;,
-  abar = list(treatment = c(1, 1), control = c(0, 0)),
-  verbose = TRUE
-)
+# Fit naive LTMLE with simplified parameters
+ltmle_naive &lt;- tryCatch({
+  ltmle(
+    data = naive_data,
+    Anodes = c(&quot;blood_pressure_medication&quot;, &quot;blood_pressure_medication_2&quot;),
+    Ynodes = &quot;mortality&quot;,
+    abar = list(treatment = c(1, 1), control = c(0, 0)),
+    gbounds = c(0.05, 0.95),  # Less aggressive bounds to prevent numeric issues
+    SL.library = sl_libs
+  )
+}, error = function(e) {
+  warning(paste(&quot;Naive LTMLE failed:&quot;, e$message))
+  return(NULL)
+})
 
 # Prepare full data (with Lnodes)
 full_data &lt;- heart_disease %&gt;%
@@ -1238,7 +1155,7 @@ full_data &lt;- heart_disease %&gt;%
     # Outcome
     mortality
   ) %&gt;%
-   mutate(
+  mutate(
     sex_at_birth = as.factor(sex_at_birth),
     simplified_race = as.factor(simplified_race),
     college_educ = as.factor(college_educ),
@@ -1247,38 +1164,85 @@ full_data &lt;- heart_disease %&gt;%
     mortality = as.numeric(mortality)
   )
 
-# Fit full LTMLE
-ltmle_full &lt;- safe_ltmle(
-  data = full_data,
-  Anodes = c(&quot;blood_pressure_medication&quot;, &quot;blood_pressure_medication_2&quot;),
-  Lnodes = c(&quot;bmi&quot;, &quot;blood_pressure&quot;, &quot;chol&quot;, 
-             &quot;bmi_2&quot;, &quot;blood_pressure_2&quot;, &quot;chol_2&quot;),
-  Ynodes = &quot;mortality&quot;,
-  abar = list(treatment = c(1, 1), control = c(0, 0)),
-  SL.library = sl_libs,
-  estimate.time = TRUE,
-  gbounds = c(0.01, 0.99),   
-  survivalOutcome = FALSE,   #Again, not really sure what anything below this in the ltmle is doing, but it kept breaking
-  deterministic.g.function = NULL,
-  deterministic.Q.function = NULL,
-  variance.method = &quot;ic&quot;,
-  family = binomial(),
-  estimate.time = TRUE,
-  verbose = TRUE
-)
+# Fit full LTMLE with simplified parameters
+ltmle_full &lt;- tryCatch({
+  ltmle(
+    data = full_data,
+    Anodes = c(&quot;blood_pressure_medication&quot;, &quot;blood_pressure_medication_2&quot;),
+    Lnodes = c(&quot;bmi&quot;, &quot;blood_pressure&quot;, &quot;chol&quot;, 
+              &quot;bmi_2&quot;, &quot;blood_pressure_2&quot;, &quot;chol_2&quot;),
+    Ynodes = &quot;mortality&quot;,
+    abar = list(treatment = c(1, 1), control = c(0, 0)),
+    SL.library = sl_libs,
+    gbounds = c(0.05, 0.95),  # Less aggressive bounds
+    family = binomial()
+  )
+}, error = function(e) {
+  warning(paste(&quot;Full LTMLE failed:&quot;, e$message))
+  return(NULL)
+})
+
+# Helper function to safely extract ATE 
+extract_results &lt;- function(model, name) {
+  if (is.null(model)) {
+    return(data.frame(
+      Model = name,
+      ATE = NA,
+      CI_Lower = NA,
+      CI_Upper = NA,
+      P_value = NA
+    ))
+  }
+  
+  tryCatch({
+    summary_obj &lt;- summary(model)
+    if (!is.null(summary_obj$effect.measures$ATE)) {
+      ate_obj &lt;- summary_obj$effect.measures$ATE
+      return(data.frame(
+        Model = name,
+        ATE = round(ate_obj$estimate, 4),
+        CI_Lower = round(ate_obj$CI[1], 4),
+        CI_Upper = round(ate_obj$CI[2], 4),
+        P_value = round(ate_obj$pvalue, 4)
+      ))
+    } else {
+      return(data.frame(
+        Model = name,
+        ATE = NA,
+        CI_Lower = NA,
+        CI_Upper = NA,
+        P_value = NA
+      ))
+    }
+  }, error = function(e) {
+    warning(paste(&quot;Failed to extract results for&quot;, name, &quot;:&quot;, e$message))
+    return(data.frame(
+      Model = name,
+      ATE = NA,
+      CI_Lower = NA,
+      CI_Upper = NA,
+      P_value = NA
+    ))
+  })
+}
 
 # Extract results
-naive_results &lt;- safe_extract_ate(ltmle_naive, &quot;Naive LTMLE&quot;)
-full_results  &lt;- safe_extract_ate(ltmle_full, &quot;Full LTMLE&quot;)
+naive_results &lt;- extract_results(ltmle_naive, &quot;Naive LTMLE&quot;)
+full_results &lt;- extract_results(ltmle_full, &quot;Full LTMLE&quot;)
 
 # Combine into comparison table
 results_comparison &lt;- rbind(naive_results, full_results)
 
 # Print results
 print(results_comparison)</code></pre>
-<pre><code>##         Model ATE CI_Lower CI_Upper P_value
-## 1 Naive LTMLE  NA       NA       NA      NA
-## 2  Full LTMLE  NA       NA       NA      NA</code></pre>
+<pre><code>##         Model     ATE CI_Lower CI_Upper P_value
+## 1 Naive LTMLE -0.3048  -0.4555  -0.1541   1e-04
+## 2  Full LTMLE      NA       NA       NA      NA</code></pre>
+<pre class="r"><code># If both models ran successfully, test for difference between them
+if (!is.na(naive_results$ATE) &amp;&amp; !is.na(full_results$ATE)) {
+  cat(&quot;\nDifference between models (Full - Naive):&quot;, 
+      round(full_results$ATE - naive_results$ATE, 4))
+}</code></pre>
 </div>
 <div id="discussion-questions" class="section level2">
 <h2>Discussion Questions</h2>
